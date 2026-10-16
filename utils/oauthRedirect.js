@@ -1,0 +1,104 @@
+// Shared helpers so any frontend app can drive Google OAuth against this
+// single backend and land back on its own domain, without each app having
+// to be pre-registered anywhere.
+//
+// ALLOWED_REDIRECT_DOMAINS (.env) is a comma-separated allowlist checked
+// against the hostname of any app-supplied redirect_uri, e.g.:
+//   ALLOWED_REDIRECT_DOMAINS=localhost,127.0.0.1,.openlabs.app,myotherapp.com
+// An entry starting with "." matches that domain and any subdomain of it.
+// This exists purely to stop /auth/google?redirect_uri=https://evil.com
+// from being used to steal a login token via open redirect - it is not a
+// per-app registration step, any host on the list works automatically.
+// Exact hostnames only by default (no wildcard like ".onrender.com") -
+// that's a shared hosting domain anyone can get a free subdomain on, so
+// wildcarding it here would let any of them receive a stolen login token
+// via this route's redirect_uri. Add each real frontend hostname you
+// control to ALLOWED_REDIRECT_DOMAINS instead.
+const getAllowedDomains = () =>
+    (process.env.ALLOWED_REDIRECT_DOMAINS || 'localhost,127.0.0.1')
+        .split(',')
+        .map((domain) => domain.trim())
+        .filter(Boolean);
+
+const isAllowedRedirectUri = (redirectUri) => {
+    if (!redirectUri) return false;
+
+    let parsed;
+    try {
+        parsed = new URL(redirectUri);
+    } catch {
+        return false;
+    }
+
+    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+
+    return getAllowedDomains().some((domain) => {
+        if (domain.startsWith('.')) {
+            const suffix = domain.slice(1);
+            return parsed.hostname === suffix || parsed.hostname.endsWith(domain);
+        }
+        return parsed.hostname === domain;
+    });
+};
+
+// Deliberately unrestricted by domain (routes/googleAuth.js uses this, not
+// isAllowedRedirectUri) - only checks that the value is a well-formed
+// http(s) URL, not which host it points at, per explicit instruction to
+// allow Google login to work with any site automatically, no .env edit per
+// app. This is a real open-redirect: a crafted
+// /auth/google?redirect_uri=https://attacker.example link sends a genuine
+// login token to attacker.example after a real Google login, because there
+// is no allowlist to catch it. Do not reuse this for anything that isn't
+// explicitly meant to be wide open - isAllowedRedirectUri above is the safe
+// default for everything else (e.g. controllers/seedbridgePayment.js).
+const isWellFormedHttpUrl = (url) => {
+    if (!url) return false;
+    try {
+        return ['http:', 'https:'].includes(new URL(url).protocol);
+    } catch {
+        return false;
+    }
+};
+
+const appendQueryParam = (url, key, value) => {
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}${key}=${encodeURIComponent(value)}`;
+};
+
+// The OAuth "state" param round-trips through Google untouched, so we use
+// it to carry the requesting app's redirect_uri across the /google ->
+// /google/callback hop.
+const encodeOAuthState = (payload) =>
+    Buffer.from(JSON.stringify(payload)).toString('base64url');
+
+const decodeOAuthState = (state) => {
+    if (!state) return null;
+    try {
+        return JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+    } catch {
+        return null;
+    }
+};
+
+// CleanBridge GH redirects (Google sign-in, Paystack): anything on
+// ALLOWED_REDIRECT_DOMAINS, plus the CleanBridge frontend itself
+// (CLEANBRIDGE_CLIENT_URL) so deploying it needs no allowlist edit.
+const isAllowedCleanbridgeRedirect = (redirectUri) => {
+    if (isAllowedRedirectUri(redirectUri)) return true;
+    try {
+        const client = new URL(process.env.CLEANBRIDGE_CLIENT_URL);
+        const target = new URL(redirectUri);
+        return target.protocol === client.protocol && target.host === client.host;
+    } catch {
+        return false;
+    }
+};
+
+module.exports = {
+    isAllowedRedirectUri,
+    isAllowedCleanbridgeRedirect,
+    isWellFormedHttpUrl,
+    appendQueryParam,
+    encodeOAuthState,
+    decodeOAuthState,
+};
