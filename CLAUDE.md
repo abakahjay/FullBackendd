@@ -122,6 +122,8 @@ because it would orphan the GridFS file. The feed groups stories by author (you 
 Views are `$addToSet` and exclude the owner, and only the owner can list viewers or delete. `GET /posts/:postId` must stay
 the last route in `postRoute.js`.
 
+**Nsoro end-to-end encrypted DMs**: `models/E2eDevice.js` holds each device's public key (`PUT /api/v1/messages/keys`, `GET /api/v1/messages/keys/:userId`, at most 10 per user). Text and voice messages may carry `Message.e2e`, an envelope built on the device (see Nsoro `src/utils/e2e.js`). `utils/e2e.js` `cleanEnvelope()` only checks its shape and size, used by REST send/edit, the voice upload and the socket `sendMessage`. When it's set, `message` is saved empty and the voice file is stored encrypted. The server can't read either, so never add features that need message text on the server (previews in pushes or emails, search). Old plain messages still work.
+
 **Instagram email + DM extras**:
 - `utils/instagramMail.js` `sendInstagramEmail()` follows the same rules as cleanbridgeMail: one-click unsubscribe (purpose `instagram-unsubscribe`) and links pointing at the live site, never localhost. It respects `User.emailNotifications` and never throws. `throttle` limits it to one email per recipient per kind every 15 minutes, tracked in memory.
 - `socialNotify` emails follows and comments; likes stay in-app only. `emailNewMessage` only emails when the recipient has no connected socket (`isUserOnline`).

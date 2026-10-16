@@ -1,9 +1,13 @@
 const express = require('express');
 const authMiddleware = require('../middleware/auth.js');
-const { sendMessage, editMessage, deleteMessage, getMessages, markAsRead, getConversations, markConversationRead } = require('../controllers/messageController');
+const { registerDeviceKey, getDeviceKeys, sendMessage, editMessage, deleteMessage, getMessages, markAsRead, getConversations, markConversationRead } = require('../controllers/messageController');
 const router = express.Router();
 
 router.use(authMiddleware);
+
+// End-to-end encryption: device public keys (before the /:userId1/:userId2 route)
+router.put('/keys', registerDeviceKey);
+router.get('/keys/:userId', getDeviceKeys);
 
 // Send a new message (voice notes: routes/messageVoiceRoute.js, mounted earlier in app.js)
 router.post('/', sendMessage);

@@ -89,15 +89,22 @@ const setupSocket = (io) => {
         // send messages that appear to be from someone else.
         // `ack` is optional: clients that pass a callback get the saved
         // message (with its real _id/timestamp) or an error back.
-        socket.on('sendMessage', async ({ recipient, message } = {}, ack) => {
+        socket.on('sendMessage', async ({ recipient, message, e2e: rawE2e } = {}, ack) => {
             const reply = typeof ack === 'function' ? ack : () => {};
-            if (!recipient || !message) {
+            let e2e = null;
+            try {
+                e2e = require('./e2e').cleanEnvelope(rawE2e);
+            } catch (error) {
+                return reply({ error: error.message });
+            }
+            if (e2e) message = '';
+            if (!recipient || (!message && !e2e)) {
                 reply({ error: 'recipient and message are required.' });
                 return socket.emit('messageError', { error: 'recipient and message are required.' });
             }
             try {
                 const newMessage = await Message.create({
-                    sender: userId, recipient, message,
+                    sender: userId, recipient, message, e2e: e2e || undefined,
                     deliveredAt: isUserOnline(recipient) ? new Date() : null,
                 });
                 reply({ message: newMessage });

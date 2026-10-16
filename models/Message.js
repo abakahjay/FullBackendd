@@ -18,9 +18,13 @@ const MessageSchema = new mongoose.Schema({
     type: { type: String, enum: ['text', 'voice', 'call'], default: 'text' },
     message: {
         type: String,
-        required: [function () { return this.type === 'text'; }, 'Please Provide the Message'],
+        required: [function () { return this.type === 'text' && !this.e2e; }, 'Please Provide the Message'],
         default: ''
     },
+    // End-to-end encrypted envelope (utils/e2e.js). When set, `message` is empty and
+    // only the two people's devices can read the text (or, for voice notes, the
+    // audio file, which is stored encrypted).
+    e2e: { type: mongoose.Schema.Types.Mixed, default: undefined },
     audioFileId: { type: mongoose.Schema.Types.ObjectId },
     duration: { type: Number, default: 0 }, // seconds, voice notes and calls
     callKind: { type: String, enum: ['audio', 'video'] }, // calls only

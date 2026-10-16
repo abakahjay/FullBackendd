@@ -4,6 +4,8 @@ const { BadRequestError, NotFoundError, UnauthenticatedError } = require('../err
 const { StatusCodes } = require('http-status-codes');
 const { emitToUserId, isUserOnline } = require('../utils/socket');
 const { emailNewMessage } = require('../utils/socialNotify');
+const E2eDevice = require('../models/E2eDevice.js');
+const { cleanEnvelope } = require('../utils/e2e');
 
 // Push a message event to both participants' open tabs/devices.
 const emitToBoth = (msg, event, payload) => {
@@ -15,14 +17,16 @@ const emitToBoth = (msg, event, payload) => {
 // otherwise any caller could send a message that appears to be from
 // someone else, same fix as the socket.io side in utils/socket.js.
 const sendMessage = async (req, res) => {
-    const { recipient, message } = req.body;
+    const { recipient } = req.body;
     const sender = req.user.userId;
+    const e2e = cleanEnvelope(req.body.e2e);
+    const message = e2e ? '' : req.body.message;
 
-    if (!recipient || !message) {
+    if (!recipient || (!message && !e2e)) {
         throw new BadRequestError('recipient and message are required.');
     }
 
-    const newMessage = await Message.create({ sender, recipient, message, deliveredAt: isUserOnline(recipient) ? new Date() : null });
+    const newMessage = await Message.create({ sender, recipient, message, e2e: e2e || undefined, deliveredAt: isUserOnline(recipient) ? new Date() : null });
     emitToUserId(String(recipient), 'receiveMessage', newMessage);
     emailNewMessage(sender, recipient);
     res.status(StatusCodes.CREATED).json(newMessage);
@@ -38,8 +42,15 @@ const sendVoiceMessage = async (req, res) => {
         throw new BadRequestError('recipient is required.');
     }
     const duration = Math.max(0, Math.min(Number(req.body.duration) || 0, 600));
+    let e2e = null;
+    try {
+        e2e = cleanEnvelope(req.body.e2e); // the audio file itself is encrypted
+    } catch (error) {
+        await new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: 'uploads' }).delete(req.file.id).catch(() => {});
+        throw error;
+    }
     const newMessage = await Message.create({
-        sender, recipient, type: 'voice', audioFileId: req.file.id, duration,
+        sender, recipient, type: 'voice', audioFileId: req.file.id, duration, e2e: e2e || undefined,
         deliveredAt: isUserOnline(recipient) ? new Date() : null,
     });
     // recipient + the sender's other tabs (the sending tab uses the response)
@@ -51,14 +62,17 @@ const sendVoiceMessage = async (req, res) => {
 // PATCH /messages/:messageId/edit - sender only, text messages only.
 const editMessage = async (req, res) => {
     const { messageId } = req.params;
-    const text = String(req.body.message || '').trim();
+    const e2e = cleanEnvelope(req.body.e2e);
+    const text = e2e ? '' : String(req.body.message || '').trim();
     if (!mongoose.Types.ObjectId.isValid(messageId)) throw new BadRequestError('Invalid message id.');
-    if (!text) throw new BadRequestError('Message cannot be empty.');
+    if (!text && !e2e) throw new BadRequestError('Message cannot be empty.');
     const msg = await Message.findById(messageId);
     if (!msg) throw new NotFoundError(`No message with id ${messageId}`);
     if (String(msg.sender) !== req.user.userId) throw new UnauthenticatedError('You can only edit your own messages.');
     if (msg.type && msg.type !== 'text') throw new BadRequestError('Only text messages can be edited.');
     msg.message = text;
+    msg.e2e = e2e || undefined;
+    msg.markModified('e2e');
     msg.editedAt = new Date();
     await msg.save();
     emitToBoth(msg, 'messageUpdated', msg);
@@ -178,4 +192,33 @@ const markConversationRead = async (req, res) => {
     res.status(StatusCodes.OK).json({ updated: result.nModified ?? result.modifiedCount ?? 0 });
 };
 
-module.exports = { sendMessage, sendVoiceMessage, editMessage, deleteMessage, getMessages, markAsRead, getConversations, markConversationRead };
+// PUT /messages/keys - register (or refresh) this device's public key.
+// A user keeps at most MAX_DEVICES; the longest-unused ones are dropped.
+const MAX_DEVICES = 10;
+const registerDeviceKey = async (req, res) => {
+    const deviceId = String(req.body.deviceId || '');
+    const publicKey = String(req.body.publicKey || '');
+    if (!/^[A-Za-z0-9-]{8,64}$/.test(deviceId)) throw new BadRequestError('Invalid device id.');
+    // raw uncompressed P-256 point: 65 bytes = 88 base64 characters
+    if (!/^[A-Za-z0-9+/]{86}[A-Za-z0-9+/=]{2}$/.test(publicKey)) throw new BadRequestError('Invalid public key.');
+    const user = req.user.userId;
+    const existing = await E2eDevice.findOne({ user, deviceId });
+    if (existing && existing.publicKey !== publicKey) {
+        // a device id never changes its key; a new key means a new device id
+        throw new BadRequestError('This device already has a different key.');
+    }
+    await E2eDevice.updateOne({ user, deviceId }, { $set: { publicKey, lastSeen: new Date() } }, { upsert: true });
+    const extra = await E2eDevice.find({ user }).sort({ lastSeen: -1 }).skip(MAX_DEVICES).select('_id');
+    if (extra.length) await E2eDevice.deleteMany({ _id: { $in: extra.map((d) => d._id) } });
+    res.status(StatusCodes.OK).json({ ok: true });
+};
+
+// GET /messages/keys/:userId - the public keys of every device a user has.
+const getDeviceKeys = async (req, res) => {
+    const { userId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(userId)) throw new BadRequestError('Please provide a valid user id.');
+    const devices = await E2eDevice.find({ user: userId }).sort({ createdAt: 1 }).select('deviceId publicKey -_id').lean();
+    res.status(StatusCodes.OK).json({ devices });
+};
+
+module.exports = { registerDeviceKey, getDeviceKeys, sendMessage, sendVoiceMessage, editMessage, deleteMessage, getMessages, markAsRead, getConversations, markConversationRead };
