@@ -177,7 +177,7 @@ environments stay in sync. Vars actually read via `process.env.*` in code: `MONG
 
 ## GH-GPT (`/api/v1/ghgpt/*`)
 
-Backend for the GH-GPT chatbot (frontend: `Desktop/VS Projects/GHGPT-main/GHGPT-main/Chatbot`, repo abakahjayy/GHGPT,
+Backend for the GH-GPT chatbot (frontend: `Desktop/VS Projects/GHGPT-main/GHGPT-main/Chatbot`, repo abakahjay/GHGPT,
 live at https://gh-gpt.onrender.com). It uses the shared `User` model and the chat models `ChatAi` (history of
 `{ role: 'user'|'model', parts: [{ text }], img? }`) and `UserChatAi` (per-user list of `{ chatId, title, pinned, createdAt }`).
 All `/api/v1/ghgpt` routes take the user from the JWT and only touch that user's chats; the older `/api/v1/ai/*`
