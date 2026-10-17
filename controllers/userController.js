@@ -148,12 +148,14 @@ exports.searchUsers = async (req, res) => {
 };
 
 exports.getUserByName = async (req, res) => {
-    const {username} = req.params
+    const username = String(req.params.username || '').trim()
     if(!username){
       throw new BadRequestError('Please Provide a username')
     }
-    // console.warn('Hi')
+    // Exact match first; then ignore case and any spaces saved around older usernames
+    // (links drop them, so those profiles used to say "User not found").
     const user = await User.findOne({username:username}).select(PRIVATE_FIELDS).populate(POPULATE_PUBLIC)
+      || await User.findOne({username: new RegExp(`^\\s*${escapeRegex(username)}\\s*$`, 'i')}).select(PRIVATE_FIELDS).populate(POPULATE_PUBLIC)
     if(!user){
       throw new NotFoundError(`No user with username: ${username}`)
     }

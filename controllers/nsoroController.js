@@ -81,11 +81,11 @@ exports.authEvent = async (req, res) => {
             user.nsoroWelcomedAt = new Date();
             sent = 'welcome';
             sendNsoroEmail(user, {
-                title: `Welcome to Nsoro, ${user.firstName || user.username}!`,
-                message: `Your account @${user.username} is ready.
+                title: 'Welcome to Nsoro',
+                message: `Your Nsoro account @${user.username} is ready.
 
-Follow friends, share photos, videos and stories, and chat with voice messages. You can also install the app on your phone or computer from the Get the app page.`,
-                cta: { label: 'Open Nsoro', url: siteUrl('/') },
+You can follow friends, share photos, videos and moments, and chat and call each other. Nsoro also works as an app on your phone or computer: open "Get the app" in Nsoro to install it.`,
+                cta: { label: 'Go to Nsoro', url: siteUrl('/') },
             });
         }
     } else if (!knownDevice && user.nsoroDevices.length > 0) {
@@ -93,11 +93,11 @@ Follow friends, share photos, videos and stories, and chat with voice messages. 
         sent = 'new-sign-in';
         const when = new Date().toUTCString();
         sendNsoroEmail(user, {
-            title: 'New sign-in to your account',
-            message: `Your account @${user.username} was just signed in to from ${describeDevice(req.headers['user-agent'])} (${when}).
+            title: 'New sign-in to your Nsoro account',
+            message: `Your Nsoro account @${user.username} was signed in on ${describeDevice(req.headers['user-agent'])} on ${when}.
 
-If this was you, there's nothing to do. If it wasn't, change your password right away and sign out of other devices.`,
-            cta: { label: 'Review your account', url: siteUrl(`/${user.username}`) },
+If that was you, you don't need to do anything. If you don't recognise it, sign in to Nsoro and change your password from your profile settings.`,
+            cta: null,
             force: true, // security email
         });
     }

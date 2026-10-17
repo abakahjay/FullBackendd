@@ -22,6 +22,7 @@ const UserSchema = new mongoose.Schema({
         maxlength: 50,
         minlength: 3,
         unique: true,
+        trim: true, // a stray space made profiles unreachable ("User not found")
     },
     email: {
         type: String,

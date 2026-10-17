@@ -38,7 +38,7 @@ function pushActivity(n) {
     pushToUser(n.recipient, {
         title: 'Nsoro',
         body: text,
-        url: n.type === 'follow' ? `/${who}` : '/notifications',
+        url: n.type === 'follow' ? `/${encodeURIComponent(who.trim())}` : '/notifications',
         tag: `ig-${n.type}-${n.post?._id || who}`,
     }, { app: 'nsoro' });
 }
@@ -47,10 +47,12 @@ function pushActivity(n) {
 function emailActivity(n) {
     (async () => {
         const recipient = await User.findById(n.recipient, 'email emailNotifications username firstName');
-        const who = n.actor?.username || 'Someone';
+        const who = (n.actor?.username || 'Someone').trim();
         const email = n.type === 'follow'
-            ? { title: `${who} started following you`, message: `${who} is now following you on Nsoro.`, cta: { label: 'View profile', url: siteUrl(`/${who}`) } }
-            : { title: `${who} commented on your post`, message: `${who} commented: "${n.text}"`, cta: { label: 'View post', url: siteUrl(`/p/${n.post?._id || ''}`) } };
+            ? { title: `${who} started following you on Nsoro`, message: `${who} started following you on Nsoro. You can see their profile and follow them back.`, cta: { label: `See ${who}'s profile`, url: siteUrl(`/${encodeURIComponent(who)}`) } }
+            : { title: `${who} commented on your post on Nsoro`, message: `${who} left a comment on your post:
+
+"${n.text}"`, cta: { label: 'See the comment', url: siteUrl(`/p/${n.post?._id || ''}`) } };
         await sendNsoroEmail(recipient, { ...email, kind: n.type, throttle: true, push: false });
     })().catch((err) => console.warn('activity email failed:', err.message));
 }
@@ -72,9 +74,9 @@ function emailNewMessage(senderId, recipientId) {
             User.findById(recipientId, 'email emailNotifications username firstName'),
         ]);
         await sendNsoroEmail(recipient, {
-            title: `New message from ${sender?.username || 'someone'}`,
-            message: `${sender?.username || 'Someone'} sent you a message on Nsoro.`,
-            cta: { label: 'Open messages', url: siteUrl(`/messages/${senderId}`) },
+            title: `${sender?.username?.trim() || 'Someone'} sent you a message on Nsoro`,
+            message: `${sender?.username?.trim() || 'Someone'} sent you a message on Nsoro while you were away.`,
+            cta: { label: 'Read the message', url: siteUrl(`/messages/${senderId}`) },
             kind: `message:${senderId}`,
             throttle: true,
             push: false,

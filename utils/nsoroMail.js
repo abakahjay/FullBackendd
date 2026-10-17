@@ -30,6 +30,11 @@ const verifyUnsubscribeToken = (token) => {
 const escapeHtml = (s) =>
     String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// Written to read like a short personal note, which is what keeps mail out of spam:
+// plain text and HTML say the same thing, one link to the site, no big buttons,
+// no images or tracking, a real reason why it was sent, and a working
+// unsubscribe (link + List-Unsubscribe headers). Callers keep titles specific and
+// name Nsoro in them ("x started following you on Nsoro"), never urgent or alarming.
 const render = ({ name, title, message, cta, unsubscribeUrl }) => {
     const greeting = name ? `Hi ${name},` : "Hi,";
     const text = [
@@ -38,34 +43,35 @@ const render = ({ name, title, message, cta, unsubscribeUrl }) => {
         message,
         cta ? `\n${cta.label}: ${cta.url}` : "",
         "",
-        "— Nsoro",
+        "Thanks,",
+        "The Nsoro team",
         "",
-        `You're receiving this because you have an account on ${siteUrl()}. Stop these emails: ${unsubscribeUrl}`,
+        "--",
+        `You got this email because you have a Nsoro account (${siteUrl().replace(/^https:\/\//, "")}) with email notifications on.`,
+        `To stop these emails: ${unsubscribeUrl}`,
     ].join("\n");
 
     const paragraphs = String(message)
         .split(/\n{2,}/)
-        .map((p) => `<p style="margin:0 0 12px;">${escapeHtml(p).replace(/\n/g, "<br>")}</p>`)
+        .map((p) => `<p style="margin:0 0 14px;">${escapeHtml(p).replace(/\n/g, "<br>")}</p>`)
         .join("");
+    const link = cta
+        ? `<p style="margin:0 0 14px;"><a href="${escapeHtml(cta.url)}" style="color:#0a7a4b;font-weight:600;">${escapeHtml(cta.label)}</a></p>`
+        : "";
 
     const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title></head>
-<body style="margin:0;padding:0;background:#fafafa;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#262626;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;padding:24px 12px;">
-    <tr><td align="center">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid #dbdbdb;border-radius:12px;">
-        <tr><td style="padding:22px 26px 6px;font-size:22px;font-weight:bold;font-family:Georgia,serif;color:#0a7a4b;">Nsoro</td></tr>
-        <tr><td style="padding:10px 26px 4px;font-size:19px;font-weight:bold;">${escapeHtml(title)}</td></tr>
-        <tr><td style="padding:8px 26px 0;font-size:15px;line-height:1.6;">${escapeHtml(greeting)}</td></tr>
-        <tr><td style="padding:8px 26px 8px;font-size:15px;line-height:1.6;">${paragraphs}</td></tr>
-        ${cta ? `<tr><td style="padding:4px 26px 22px;"><a href="${escapeHtml(cta.url)}" style="display:inline-block;background:#0095f6;color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:bold;">${escapeHtml(cta.label)}</a></td></tr>` : ""}
-        <tr><td style="padding:14px 26px 22px;border-top:1px solid #efefef;font-size:12px;line-height:1.5;color:#8e8e8e;">
-          You're receiving this because you have a Nsoro account.
-          <a href="${escapeHtml(unsubscribeUrl)}" style="color:#8e8e8e;">Stop these emails</a>.
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
+<body style="margin:0;padding:24px 16px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222222;">
+<div style="max-width:560px;margin:0 auto;">
+<p style="margin:0 0 14px;">${escapeHtml(greeting)}</p>
+${paragraphs}
+${link}
+<p style="margin:0 0 24px;">Thanks,<br>The Nsoro team</p>
+<p style="margin:0;padding-top:12px;border-top:1px solid #e5e5e5;font-size:12px;line-height:1.5;color:#777777;">
+You got this email because you have a Nsoro account with email notifications on.
+<a href="${escapeHtml(unsubscribeUrl)}" style="color:#777777;">Unsubscribe</a>
+</p>
+</div>
 </body></html>`;
     return { text, html };
 };
