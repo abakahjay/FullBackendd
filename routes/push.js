@@ -67,7 +67,7 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
     const { subscription } = req.body;
     const { app } = req.body;
     if (!USER_APPS.includes(app)) throw new BadRequestError(`app must be one of: ${USER_APPS.join(', ')}`);
-    const saved = await saveSubscription({ userId: req.user.userId, realm: 'user', app, subscription, userAgent: req.headers['user-agent'] });
+    const saved = await saveSubscription({ userId: req.user.userId, realm: 'user', app, subscription, userAgent: req.headers['user-agent'], client: req.body.client });
     confirmDevice(saved, app, req.user.userId);
     res.status(StatusCodes.CREATED).json({ subscribed: true });
 });

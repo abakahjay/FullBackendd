@@ -91,7 +91,12 @@ async function pushToUser(userId, payload, { app, realm = 'user' } = {}) {
     try {
         if (!userId) return 0;
         const query = { userId, realm, ...(app && { app }) };
-        const subs = await PushSubscription.find(query).lean();
+        let subs = await PushSubscription.find(query).lean();
+        // A call to someone with the Android app: their phone's browsers would only show
+        // a second, silent "incoming call", so the app (which rings) gets it instead.
+        if (payload.call && subs.some((s) => s.client === 'android-app')) {
+            subs = subs.filter((s) => s.client === 'android-app' || !/Android/i.test(s.userAgent || ''));
+        }
         return await sendToSubscriptions(subs, { ...payload, app: payload.app || app });
     } catch (err) {
         console.error('pushToUser failed:', err.message);
@@ -124,7 +129,7 @@ async function pushToAdmins(payload) {
     }
 }
 
-async function saveSubscription({ userId, realm = 'user', app, subscription, userAgent }) {
+async function saveSubscription({ userId, realm = 'user', app, subscription, userAgent, client = 'web' }) {
     const endpoint = subscription?.endpoint;
     const keys = subscription?.keys || {};
     if (!endpoint || !/^https:\/\//.test(endpoint) || !keys.p256dh || !keys.auth) {
@@ -136,7 +141,7 @@ async function saveSubscription({ userId, realm = 'user', app, subscription, use
     const before = await PushSubscription.findOne({ endpoint }, 'userId realm app').lean();
     const subscriptionDoc = await PushSubscription.findOneAndUpdate(
         { endpoint },
-        { userId, realm, app, endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, userAgent: String(userAgent || '').slice(0, 300) },
+        { userId, realm, app, endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, userAgent: String(userAgent || '').slice(0, 300), client: client === 'android-app' ? 'android-app' : 'web' },
         { upsert: true, new: true, setDefaultsOnInsert: true }
     );
     // isNew: this device wasn't linked to this account/app before (first time on, or a different user signed in).

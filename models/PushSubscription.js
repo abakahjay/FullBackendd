@@ -14,6 +14,8 @@ const pushSubscriptionSchema = new mongoose.Schema(
             auth: { type: String, required: true },
         },
         userAgent: String,
+        // 'android-app': subscribed inside the Nsoro Android app, which rings for calls itself.
+        client: { type: String, enum: ['web', 'android-app'], default: 'web' },
         lastSuccessAt: Date,
     },
     { timestamps: true }
