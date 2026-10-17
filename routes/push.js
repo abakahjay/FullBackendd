@@ -79,6 +79,20 @@ router.post('/resubscribe', testLimiter, async (req, res) => {
     res.status(StatusCodes.OK).json({ moved });
 });
 
+// The Nsoro Android app's Firebase token (utils/fcm.js), sent by the signed-in page
+// after the app hands it over in the launch URL. Calls then wake the app directly.
+router.post('/fcm/register', authMiddleware, async (req, res) => {
+    const token = String(req.body?.token || '').trim();
+    if (!token || token.length > 4096) throw new BadRequestError('token is required');
+    await require('../utils/fcm').saveFcmToken(req.user.userId, token, req.body.versionCode);
+    res.status(StatusCodes.CREATED).json({ registered: true, enabled: require('../utils/fcm').fcmEnabled() });
+});
+
+router.post('/fcm/unregister', authMiddleware, async (req, res) => {
+    if (req.body?.token) await require('../utils/fcm').removeFcmToken(String(req.body.token));
+    res.status(StatusCodes.OK).json({ registered: false });
+});
+
 router.post('/unsubscribe', authMiddleware, async (req, res) => {
     if (!req.body.endpoint) throw new BadRequestError('endpoint is required');
     await removeSubscription(String(req.body.endpoint), req.user.userId);

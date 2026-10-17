@@ -15,6 +15,7 @@ const Story = require('../models/Story');
 const SocialNotification = require('../models/SocialNotification');
 const E2eDevice = require('../models/E2eDevice');
 const PushSubscription = require('../models/PushSubscription');
+const FcmToken = require('../models/FcmToken');
 const Token = require('../models/Token');
 const Chat = require('../models/ChatAi');
 const UserChats = require('../models/UserChatAi');
@@ -89,6 +90,7 @@ async function deleteUserEverywhere(userId) {
     // Devices and sessions.
     await E2eDevice.deleteMany({ user: id });
     await PushSubscription.deleteMany({ userId: id, realm: 'user' });
+    await FcmToken.deleteMany({ userId: id });
     await Token.deleteMany({ user: id });
 
     // Profile photo, every collected file, then the account itself.

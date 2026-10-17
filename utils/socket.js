@@ -176,6 +176,7 @@ const finishCall = async (io, call, reason) => {
     if (!calls.has(call.id)) return;
     calls.delete(call.id);
     clearTimeout(call.ringTimer);
+    require('./fcm').fcmToUser(call.callee, { type: 'call-end', callId: call.id, reason }); // stop the app ringing
     [call.caller, call.callee].forEach((u) => emitToUser(io, u, 'call:ended', { callId: call.id, reason }));
 
     const duration = call.acceptedAt ? Math.round((Date.now() - call.acceptedAt) / 1000) : 0;
@@ -251,6 +252,19 @@ const setupCallEvents = (io, socket) => {
             ttl: Math.ceil(RING_MS / 1000), // a phone that was offline must not ring for a call that's over
             ack: require('./pushAck').makeAck({ kind: 'ringing', callId }),
         }, { app: 'nsoro' });
+
+        // The Android app itself (Firebase): rings even when Chrome is asleep.
+        const ring = require('./pushAck').makeAck({ kind: 'ringing', callId });
+        require('./fcm').fcmToUser(call.callee, {
+            type: 'call',
+            callId,
+            kind: call.kind,
+            caller: caller?.username || 'Nsoro',
+            url: `/messages/${userId}`,
+            ackUrl: ring.url,
+            ackToken: ring.token,
+            expiresAt: Date.now() + RING_MS,
+        }, { ttlSeconds: Math.ceil(RING_MS / 1000) });
     });
 
     // the callee's open app got the call
@@ -267,6 +281,7 @@ const setupCallEvents = (io, socket) => {
         call.acceptedAt = Date.now();
         call.calleeSocket = socket.id;
         io.to(call.callerSocket).emit('call:accepted', { callId });
+        require('./fcm').fcmToUser(userId, { type: 'call-end', callId, reason: 'answered' });
         // stop it ringing on the callee's other tabs/devices
         userSockets.get(userId)?.forEach((id) => {
             if (id !== socket.id) io.to(id).emit('call:ended', { callId, reason: 'answered-elsewhere' });
