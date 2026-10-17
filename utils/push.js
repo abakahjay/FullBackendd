@@ -91,12 +91,10 @@ async function pushToUser(userId, payload, { app, realm = 'user' } = {}) {
     try {
         if (!userId) return 0;
         const query = { userId, realm, ...(app && { app }) };
-        let subs = await PushSubscription.find(query).lean();
-        // A call to someone with the Android app: their phone's browsers would only show
-        // a second, silent "incoming call", so the app (which rings) gets it instead.
-        if (payload.call && subs.some((s) => s.client === 'android-app')) {
-            subs = subs.filter((s) => s.client === 'android-app' || !/Android/i.test(s.userAgent || ''));
-        }
+        // Every device gets every push, calls included. (Skipping a phone's browser
+        // subscriptions when it has the app sounded tidy, but an old, dead app
+        // subscription then hid the working one, and the phone never rang.)
+        const subs = await PushSubscription.find(query).lean();
         return await sendToSubscriptions(subs, { ...payload, app: payload.app || app });
     } catch (err) {
         console.error('pushToUser failed:', err.message);
