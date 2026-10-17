@@ -4,7 +4,7 @@ const { StatusCodes } = require('http-status-codes');
 const authMiddleware = require('../middleware/auth');
 const cleanbridgeAuth = require('../middleware/cleanbridgeAuth');
 const { BadRequestError } = require('../errors');
-const { getPublicKey, pushToUser, pushToSubscription, saveSubscription, removeSubscription } = require('../utils/push');
+const { getPublicKey, pushToUser, pushToSubscription, saveSubscription, removeSubscription, moveSubscription } = require('../utils/push');
 const User = require('../models/User');
 
 // Web Push device notifications for every app (/api/v1/push). See utils/push.js.
@@ -70,6 +70,13 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
     const saved = await saveSubscription({ userId: req.user.userId, realm: 'user', app, subscription, userAgent: req.headers['user-agent'], client: req.body.client });
     confirmDevice(saved, app, req.user.userId);
     res.status(StatusCodes.CREATED).json({ subscribed: true });
+});
+
+// From the service worker (no login there): the browser swapped this device's push
+// subscription; { oldEndpoint, subscription }. See utils/push.js moveSubscription.
+router.post('/resubscribe', testLimiter, async (req, res) => {
+    const moved = await moveSubscription(req.body?.oldEndpoint, req.body?.subscription).catch(() => false);
+    res.status(StatusCodes.OK).json({ moved });
 });
 
 router.post('/unsubscribe', authMiddleware, async (req, res) => {

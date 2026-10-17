@@ -159,4 +159,23 @@ async function pushToSubscription(subscriptionDoc, payload) {
 
 const removeSubscription = (endpoint, userId) => PushSubscription.deleteOne({ endpoint, ...(userId && { userId }) });
 
-module.exports = { getPublicKey, pushToUser, pushToAdmins, pushToSubscription, saveSubscription, removeSubscription };
+/**
+ * The browser replaced a device's push subscription (pushsubscriptionchange in the
+ * service worker, e.g. after notifications were switched off and on, or an app update).
+ * Moves the device's row to the new endpoint so it keeps getting pushes. The old
+ * endpoint is the proof: it's a long secret URL only that browser knew.
+ */
+async function moveSubscription(oldEndpoint, subscription) {
+    const endpoint = subscription?.endpoint;
+    const keys = subscription?.keys || {};
+    if (!oldEndpoint || !endpoint || !/^https:\/\//.test(endpoint) || !keys.p256dh || !keys.auth) return false;
+    const row = await PushSubscription.findOne({ endpoint: String(oldEndpoint) });
+    if (!row) return false;
+    await PushSubscription.deleteOne({ endpoint, _id: { $ne: row._id } }); // a stale copy of the new one
+    row.endpoint = endpoint;
+    row.keys = { p256dh: keys.p256dh, auth: keys.auth };
+    await row.save();
+    return true;
+}
+
+module.exports = { getPublicKey, pushToUser, pushToAdmins, pushToSubscription, saveSubscription, removeSubscription, moveSubscription };
