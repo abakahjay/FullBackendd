@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-// Instagram-style story: a photo/video (GridFS `uploads` bucket, served by
+// A Nsoro moment (story): a photo/video (GridFS `uploads` bucket, served by
 // GET /api/v1/posts/media/:fileId) that disappears 24h after posting.
 // Expired stories are deleted - file included - by controllers/storyController.js
 // (not a TTL index, which would leave the GridFS file behind).

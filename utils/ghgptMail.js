@@ -3,7 +3,7 @@ const { deliver, emailProvider } = require("./mailTransport");
 const { pushToUser } = require("./push");
 
 // Email for GH-GPT (GHGPT-main/Chatbot): welcome, new sign-in alerts and
-// "email me this chat". Same deliverability rules as utils/instagramMail.js:
+// "email me this chat". Same deliverability rules as utils/nsoroMail.js:
 // sent as EMAIL_USER via utils/mailTransport.js, plain text + simple HTML,
 // RFC 8058 one-click unsubscribe. GH-GPT has its own opt-out
 // (User.ghgptEmailNotifications) because User is shared with other apps.

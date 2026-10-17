@@ -12,18 +12,6 @@ const router = express.Router();
 const testLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
 
 const USER_APPS = ['ghgpt', 'nsoro'];
-// Nsoro was called 'instagram' here; older app versions still send that.
-const appKey = (app) => (app === 'instagram' ? 'nsoro' : app);
-
-// One-off: move existing Nsoro devices to the new key so they keep getting pushes.
-const PushSubscription = require('../models/PushSubscription');
-const mongoose = require('mongoose');
-const migrateAppKey = () =>
-    PushSubscription.updateMany({ app: 'instagram' }, { $set: { app: 'nsoro' } })
-        .then((r) => (r.modifiedCount || r.nModified) && console.log(`Push: moved ${r.modifiedCount || r.nModified} devices to app 'nsoro'`))
-        .catch((err) => console.warn('Push app-key migration failed:', err.message));
-if (mongoose.connection.readyState === 1) migrateAppKey();
-else mongoose.connection.once('open', migrateAppKey);
 const TEST_MESSAGES = {
     ghgpt: { title: 'GH-GPT notifications are on', body: "You'll get alerts for sign-ins, emails and finished images on this device.", url: '/dashboard' },
     nsoro: { title: 'Nsoro notifications are on', body: "You'll get alerts for messages, likes, comments and follows on this device.", url: '/notifications' },
@@ -77,7 +65,7 @@ router.get('/public-key', async (req, res) => {
 // Shared User accounts (GH-GPT, Nsoro).
 router.post('/subscribe', authMiddleware, async (req, res) => {
     const { subscription } = req.body;
-    const app = appKey(req.body.app);
+    const { app } = req.body;
     if (!USER_APPS.includes(app)) throw new BadRequestError(`app must be one of: ${USER_APPS.join(', ')}`);
     const saved = await saveSubscription({ userId: req.user.userId, realm: 'user', app, subscription, userAgent: req.headers['user-agent'] });
     confirmDevice(saved, app, req.user.userId);
@@ -91,7 +79,7 @@ router.post('/unsubscribe', authMiddleware, async (req, res) => {
 });
 
 router.post('/test', authMiddleware, testLimiter, async (req, res) => {
-    const app = USER_APPS.includes(appKey(req.body.app)) ? appKey(req.body.app) : 'ghgpt';
+    const app = USER_APPS.includes(req.body.app) ? req.body.app : 'ghgpt';
     const delivered = await pushToUser(req.user.userId, { ...TEST_MESSAGES[app], tag: 'test' }, { app });
     res.status(StatusCodes.OK).json({ delivered });
 });

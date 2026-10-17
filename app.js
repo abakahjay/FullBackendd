@@ -159,13 +159,12 @@ app.use('/api/v1/userse', userProfilePic);
 //This is for posts
 
 app.use('/api/v1/posts', postRoutes);
-// Instagram stories (multipart upload, so it sits with posts before the JSON body parsers)
+// Nsoro moments (multipart upload, so it sits with posts before the JSON body parsers)
 app.use('/api/v1/stories', require('./routes/storyRoutes'));
 // Voice notes in DMs (multipart too); the rest of /api/v1/messages is mounted later
 app.use('/api/v1/messages/voice', require('./routes/messageVoiceRoute'));
-// Instagram clone logged-in uploads (new post, profile photo); JSON routes mounted later
-// /api/v1/nsoro is the app's name now; /api/v1/instagram stays for older installs.
-app.use(['/api/v1/nsoro', '/api/v1/instagram'], require('./routes/instagramUploadRoutes'));
+// Nsoro logged-in uploads (new post, profile photo); JSON routes mounted later
+app.use('/api/v1/nsoro', require('./routes/nsoroUploadRoutes'));
 // GH-GPT image upload (multipart); the JSON GH-GPT routes are mounted later
 app.use('/api/v1/ghgpt', require('./routes/ghgptUploadRoutes'));
 app.use('/api/v1/ai', aiImageRoutes);
@@ -274,8 +273,8 @@ app.use('/api/v1/delivery', deliveryRouter)
 app.use('/api/v1/changedel', changeDelRouter)
 app.use('/api/v1/messages', messageRoutes);
 app.use('/api/v1/notifications', socialNotificationRoutes);
-// Instagram clone: email unsubscribe, email settings, admin app-update emails
-app.use(['/api/v1/nsoro', '/api/v1/instagram'], require('./routes/instagramRoutes'));
+// Nsoro: email unsubscribe, email settings, admin app-update emails
+app.use('/api/v1/nsoro', require('./routes/nsoroRoutes'));
 app.use('/api/v1/users', userRoutes);
 
 app.use('/api/v1/comments', commentRoutes);

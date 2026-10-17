@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const { StatusCodes } = require('http-status-codes');
 const User = require('../models/User');
 const { BadRequestError } = require('../errors');
-const { sendInstagramEmail, verifyUnsubscribeToken, siteUrl, emailEnabled } = require('../utils/instagramMail');
+const { sendNsoroEmail, verifyUnsubscribeToken, siteUrl, emailEnabled } = require('../utils/nsoroMail');
 const { pushToUser } = require('../utils/push');
 
 // ---- Unsubscribe (same pattern as controllers/cleanbridgeEmail.js) ----------
@@ -70,17 +70,17 @@ exports.authEvent = async (req, res) => {
     if (!['signup', 'login'].includes(type)) throw new BadRequestError('type must be signup or login');
     if (!deviceId || String(deviceId).length > 100) throw new BadRequestError('deviceId is required');
 
-    const user = await User.findById(req.user.userId, 'email username firstName emailNotifications instagramWelcomedAt instagramDevices createdAt');
+    const user = await User.findById(req.user.userId, 'email username firstName emailNotifications nsoroWelcomedAt nsoroDevices createdAt');
     const key = deviceKey(deviceId);
-    const knownDevice = user.instagramDevices.includes(key);
-    const isNewAccount = !user.instagramWelcomedAt && user.createdAt && Date.now() - new Date(user.createdAt).getTime() < 24 * 3600e3;
+    const knownDevice = user.nsoroDevices.includes(key);
+    const isNewAccount = !user.nsoroWelcomedAt && user.createdAt && Date.now() - new Date(user.createdAt).getTime() < 24 * 3600e3;
     let sent = null;
 
     if (type === 'signup' || isNewAccount) {
-        if (!user.instagramWelcomedAt) {
-            user.instagramWelcomedAt = new Date();
+        if (!user.nsoroWelcomedAt) {
+            user.nsoroWelcomedAt = new Date();
             sent = 'welcome';
-            sendInstagramEmail(user, {
+            sendNsoroEmail(user, {
                 title: `Welcome to Nsoro, ${user.firstName || user.username}!`,
                 message: `Your account @${user.username} is ready.
 
@@ -88,11 +88,11 @@ Follow friends, share photos, videos and stories, and chat with voice messages. 
                 cta: { label: 'Open Nsoro', url: siteUrl('/') },
             });
         }
-    } else if (!knownDevice && user.instagramDevices.length > 0) {
+    } else if (!knownDevice && user.nsoroDevices.length > 0) {
         // (the very first device an existing account reports is just remembered)
         sent = 'new-sign-in';
         const when = new Date().toUTCString();
-        sendInstagramEmail(user, {
+        sendNsoroEmail(user, {
             title: 'New sign-in to your account',
             message: `Your account @${user.username} was just signed in to from ${describeDevice(req.headers['user-agent'])} (${when}).
 
@@ -113,7 +113,7 @@ If this was you, there's nothing to do. If it wasn't, change your password right
         }, { app: 'nsoro' });
     }
 
-    if (!knownDevice) user.instagramDevices = [key, ...user.instagramDevices].slice(0, MAX_DEVICES);
+    if (!knownDevice) user.nsoroDevices = [key, ...user.nsoroDevices].slice(0, MAX_DEVICES);
     await user.save();
     res.status(StatusCodes.OK).json({ ok: true, sent });
 };
@@ -140,7 +140,7 @@ exports.sendUpdate = async (req, res) => {
     let sent = 0;
     for (const user of recipients.slice(0, MAX_PER_CALL)) {
         // force only for the admin's own test copy
-        if (await sendInstagramEmail(user, { title: subject, message, cta, force: !!req.body.test })) sent++;
+        if (await sendNsoroEmail(user, { title: subject, message, cta, force: !!req.body.test })) sent++;
     }
     res.status(StatusCodes.OK).json({
         sent,

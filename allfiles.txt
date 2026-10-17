@@ -506,7 +506,6 @@
 3259522799d8671b778e843f63f381a4578f515a font-awesome/svgs/solid/people-line.svg
 329929c19ee291bebd458def6198cc53675bc133 font-awesome/svgs/solid/phone-volume.svg
 329c667dc58709735e53dc7c96ec278130f3c9d1 font-awesome/js/conflict-detection.min.js
-32a5ee6335aad3b6255df9fe88b8f7c16feb9520 public/images/pngs/instagram.png
 32ca3e8b7adf0aaff180f58b03aedff2a54d94a4 font-awesome/svgs/solid/fan.svg
 32ebca69d7f86e0ac1460eb069fa1ff865d25427 font-awesome/svgs/solid/file-circle-plus.svg
 32fb79481ed1216ac2354e020a1d5f41796a6eae font-awesome/svgs/solid/sliders.svg

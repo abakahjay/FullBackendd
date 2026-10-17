@@ -8,7 +8,7 @@ const posts = require('./postController');
 const users = require('./userController');
 const comments = require('./commentController');
 
-// Logged-in versions of Nsoro's social actions, under /api/v1/nsoro (and the old /api/v1/instagram).
+// Logged-in versions of Nsoro's social actions, under /api/v1/nsoro.
 //
 // The original routes (/api/v1/posts, /users/:id/follow, /comments...) trust a userId
 // sent by the browser, so anyone can act as anyone. They are still used unchanged by
@@ -21,13 +21,13 @@ const validId = (id, what) => {
     if (!mongoose.Types.ObjectId.isValid(id)) throw new BadRequestError(`Invalid ${what} id`);
 };
 
-// POST /instagram/posts (multipart "file" + caption) - you are the author.
+// POST /nsoro/posts (multipart "file" + caption) - you are the author.
 exports.createPost = (req, res) => {
     req.query.userId = me(req);
     return posts.createPost(req, res);
 };
 
-// DELETE /instagram/posts/:postId - only the author.
+// DELETE /nsoro/posts/:postId - only the author.
 exports.deletePost = async (req, res) => {
     validId(req.params.postId, 'post');
     const post = await Post.findById(req.params.postId, { postId: 1, createdBy: 1 });
@@ -38,7 +38,7 @@ exports.deletePost = async (req, res) => {
     return posts.deletePost(req, res);
 };
 
-// PATCH /instagram/posts/:postId/like | /unlike - as yourself.
+// PATCH /nsoro/posts/:postId/like | /unlike - as yourself.
 exports.likePost = (req, res) => {
     req.body = { ...req.body, userId: me(req) };
     return posts.likePosts(req, res);
@@ -48,13 +48,13 @@ exports.unlikePost = (req, res) => {
     return posts.unlikePosts(req, res);
 };
 
-// POST /instagram/posts/:postId/comments { text } - as yourself.
+// POST /nsoro/posts/:postId/comments { text } - as yourself.
 exports.addComment = (req, res) => {
     req.body = { text: req.body.text, userId: me(req) };
     return comments.addComment(req, res);
 };
 
-// DELETE /instagram/comments/:commentId - the commenter or the post's author.
+// DELETE /nsoro/comments/:commentId - the commenter or the post's author.
 exports.deleteComment = async (req, res) => {
     validId(req.params.commentId, 'comment');
     const comment = await Comment.findById(req.params.commentId);
@@ -67,7 +67,7 @@ exports.deleteComment = async (req, res) => {
     res.status(StatusCodes.OK).json({ deleted: true, _id: comment._id });
 };
 
-// PATCH /instagram/users/:targetId/follow | /unfollow - you follow them.
+// PATCH /nsoro/users/:targetId/follow | /unfollow - you follow them.
 exports.follow = (req, res) => {
     validId(req.params.targetId, 'user');
     if (req.params.targetId === me(req)) throw new BadRequestError("You can't follow yourself");
@@ -82,7 +82,7 @@ exports.unfollow = (req, res) => {
     return users.unfollowUser(req, res);
 };
 
-// PATCH /instagram/me { firstName, lastName, username, bio } - your own profile only.
+// PATCH /nsoro/me { firstName, lastName, username, bio } - your own profile only.
 const PUBLIC_FIELDS = '-password -tokens -resetPasswordToken -resetPasswordExpires';
 exports.updateMe = async (req, res) => {
     const update = {};
@@ -96,7 +96,7 @@ exports.updateMe = async (req, res) => {
     res.status(StatusCodes.OK).json({ user });
 };
 
-// PATCH /instagram/me/photo (multipart "photo") - your own profile picture.
+// PATCH /nsoro/me/photo (multipart "photo") - your own profile picture.
 exports.updateMyPhoto = async (req, res) => {
     if (!req.file) throw new BadRequestError('Please choose a photo');
     const user = await User.findById(me(req));

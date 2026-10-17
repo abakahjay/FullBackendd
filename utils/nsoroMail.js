@@ -2,7 +2,7 @@ const jwt = require("jsonwebtoken");
 const { deliver, emailProvider } = require("./mailTransport");
 const { pushToUser } = require("./push");
 
-// Email for the Instagram clone (React-products/Instagram): activity emails
+// Email for Nsoro: activity emails
 // (new follower, comment, message while you're away) and admin "app update" emails.
 // Same deliverability rules as utils/cleanbridgeMail.js: sent as EMAIL_USER via
 // utils/mailTransport.js, plain text + simple HTML, RFC 8058 one-click unsubscribe.
@@ -13,13 +13,13 @@ const enabled = Boolean(emailProvider);
 const LIVE_SITE = "https://nsoro-app.onrender.com";
 const isLocal = (url) => !url || /^https?:\/\/(localhost|127\.|0\.0\.0\.0|192\.168\.|10\.)/i.test(url);
 const siteUrl = (path = "") => {
-    const configured = process.env.INSTAGRAM_PUBLIC_URL;
+    const configured = process.env.NSORO_PUBLIC_URL;
     return `${(isLocal(configured) ? LIVE_SITE : configured).replace(/\/$/, "")}${path}`;
 };
 // The unsubscribe link must hit the server (and database) that sent the email.
 const apiUrl = (path = "") => `${(process.env.ORIGIN || "http://localhost:7004").replace(/\/$/, "")}${path}`;
 
-const PURPOSE = "instagram-unsubscribe";
+const PURPOSE = "nsoro-unsubscribe";
 const unsubscribeToken = (userId) => jwt.sign({ uid: String(userId), purpose: PURPOSE }, process.env.JWT_SECRET);
 const verifyUnsubscribeToken = (token) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -79,7 +79,7 @@ const lastSent = new Map();
  * Send one email to a User. Never throws. Respects user.emailNotifications
  * unless force. `kind` + `throttle` limit repeats of activity emails.
  */
-async function sendInstagramEmail(user, { title, message, cta, kind, throttle = false, force = false, push = true }) {
+async function sendNsoroEmail(user, { title, message, cta, kind, throttle = false, force = false, push = true }) {
     if (push && user?._id) {
         pushToUser(user._id, {
             title,
@@ -118,4 +118,4 @@ async function sendInstagramEmail(user, { title, message, cta, kind, throttle = 
     }
 }
 
-module.exports = { sendInstagramEmail, verifyUnsubscribeToken, siteUrl, emailEnabled: enabled };
+module.exports = { sendNsoroEmail, verifyUnsubscribeToken, siteUrl, emailEnabled: enabled };

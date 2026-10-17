@@ -1,7 +1,7 @@
 const SocialNotification = require('../models/SocialNotification');
 const { emitToUserId, isUserOnline } = require('./socket');
 const User = require('../models/User');
-const { sendInstagramEmail, siteUrl } = require('./instagramMail');
+const { sendNsoroEmail, siteUrl } = require('./nsoroMail');
 const { pushToUser } = require('./push');
 const { makeAck } = require('./pushAck');
 
@@ -51,7 +51,7 @@ function emailActivity(n) {
         const email = n.type === 'follow'
             ? { title: `${who} started following you`, message: `${who} is now following you on Nsoro.`, cta: { label: 'View profile', url: siteUrl(`/${who}`) } }
             : { title: `${who} commented on your post`, message: `${who} commented: "${n.text}"`, cta: { label: 'View post', url: siteUrl(`/p/${n.post?._id || ''}`) } };
-        await sendInstagramEmail(recipient, { ...email, kind: n.type, throttle: true, push: false });
+        await sendNsoroEmail(recipient, { ...email, kind: n.type, throttle: true, push: false });
     })().catch((err) => console.warn('activity email failed:', err.message));
 }
 
@@ -71,7 +71,7 @@ function emailNewMessage(senderId, recipientId) {
             User.findById(senderId, 'username'),
             User.findById(recipientId, 'email emailNotifications username firstName'),
         ]);
-        await sendInstagramEmail(recipient, {
+        await sendNsoroEmail(recipient, {
             title: `New message from ${sender?.username || 'someone'}`,
             message: `${sender?.username || 'Someone'} sent you a message on Nsoro.`,
             cta: { label: 'Open messages', url: siteUrl(`/messages/${senderId}`) },

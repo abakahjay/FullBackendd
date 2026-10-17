@@ -92,7 +92,7 @@ for anyone who isn't a participant in that conversation. The socket's `sendMessa
 ack callback, which receives `{ message }` (the saved doc) or `{ error }`. `GET /api/v1/messages/conversations`
 returns the caller's inbox: one row per other user with their public fields, the last message and an unread
 count. `PATCH /api/v1/messages/conversations/:otherUserId/read` marks that conversation as read.
-`React-products-master/Instagram` is the frontend that uses all of this (`useChat`/`useConversations`).
+`React-products-master/React-products-master/Nsoro` is the frontend that uses all of this (`useChat`/`useConversations`).
 `ChatAppDemo.jsx` in `GHGPT-main` is still an old, unauthenticated mock.
 
 **Post media (GridFS)**: posts store an image or video in the `uploads` GridFS bucket. `Posts.mediaType` is
@@ -105,7 +105,7 @@ support, which `<video>` needs for seeking; the older `/posts/image/:id` has no 
 override, any aborted upload hangs the request forever and leaves the partial file behind. Keep the override
 if you touch that file.
 
-**Instagram social features**: `utils/socialNotify.js` `notify()`/`unnotify()` write `models/SocialNotification.js`
+**Nsoro social features**: `utils/socialNotify.js` `notify()`/`unnotify()` write `models/SocialNotification.js`
 (like/comment/follow, no self-notifications, one row per actor for like/follow) and push a `notification` socket
 event through `utils/socket.js` `emitToUserId`. They are called from `likePosts`/`unlikePosts`, `addComment` and
 `followUser`/`unfollowUser`, and never throw. `GET /api/v1/notifications` and `PATCH /api/v1/notifications/read`
@@ -115,7 +115,7 @@ holds GridFS file ids). `getUser`, `getUserByName` and `getAllUsers` strip passw
 including on populated followers and following. `scripts/backfillPostMediaType.js` repairs `Posts.mediaType` for
 posts uploaded before it was recorded.
 
-**Instagram stories** (`/api/v1/stories`, all auth, mounted next to posts because uploads are multipart): stories go into the
+**Nsoro moments (stories)** (`/api/v1/stories`, all auth, mounted next to posts because uploads are multipart): stories go into the
 same `uploads` GridFS bucket through `postUpload` and are served by `/posts/media/:fileId`. They expire after 24h.
 `purgeExpired()` runs on every feed read and deletes the Story doc and its file. A TTL index was deliberately not used,
 because it would orphan the GridFS file. The feed groups stories by author (you first, then unseen, then most recent).
@@ -124,17 +124,17 @@ the last route in `postRoute.js`.
 
 **Nsoro end-to-end encrypted DMs**: `models/E2eDevice.js` holds each device's public key (`PUT /api/v1/messages/keys`, `GET /api/v1/messages/keys/:userId`, at most 10 per user). Text and voice messages may carry `Message.e2e`, an envelope built on the device (see Nsoro `src/utils/e2e.js`). `utils/e2e.js` `cleanEnvelope()` only checks its shape and size, used by REST send/edit, the voice upload and the socket `sendMessage`. When it's set, `message` is saved empty and the voice file is stored encrypted. The server can't read either, so never add features that need message text on the server (previews in pushes or emails, search). Old plain messages still work.
 
-**Instagram email + DM extras**:
-- `utils/instagramMail.js` `sendInstagramEmail()` follows the same rules as cleanbridgeMail: one-click unsubscribe (purpose `instagram-unsubscribe`) and links pointing at the live site, never localhost. It respects `User.emailNotifications` and never throws. `throttle` limits it to one email per recipient per kind every 15 minutes, tracked in memory.
+**Nsoro email + DM extras**:
+- `utils/nsoroMail.js` `sendNsoroEmail()` follows the same rules as cleanbridgeMail: one-click unsubscribe (purpose `nsoro-unsubscribe`; `NSORO_PUBLIC_URL` sets the site address) and links pointing at the live site, never localhost. It respects `User.emailNotifications` and never throws. `throttle` limits it to one email per recipient per kind every 15 minutes, tracked in memory.
 - `socialNotify` emails follows and comments; likes stay in-app only. `emailNewMessage` only emails when the recipient has no connected socket (`isUserOnline`).
-- `/api/v1/instagram` covers unsubscribe (a GET page, then POST), `PATCH /settings/email`, and `POST /updates` (admin broadcast, at most 90 per call because of the Gmail relay's daily limit).
+- `/api/v1/nsoro` covers unsubscribe (a GET page, then POST), `PATCH /settings/email`, and `POST /updates` (admin broadcast, at most 90 per call because of the Gmail relay's daily limit).
 - Voice notes (`routes/messageVoiceRoute.js`) are mounted early in app.js because the global `express-fileupload` would otherwise eat the multipart body. This applies to any new upload route: `postUpload(field, { accept, maxBytes, kind })` must run before `app.use(fileUpload())`.
 - Edit and delete are sender-only. They emit `messageUpdated` and `messageDeleted` to both people, and delete also removes the audio file from GridFS.
 
-**Nsoro (formerly the Instagram clone) logged-in social API** (`/api/v1/nsoro`, controllers/instagramSocialController.js). The app was renamed Nsoro. Both its routers are mounted at `/api/v1/nsoro` and, for older installs, at `/api/v1/instagram`. The file names and the `instagram*` User fields keep the old name; they're internal.
+**Nsoro logged-in social API** (`/api/v1/nsoro`, controllers/nsoroSocialController.js). Both its routers (routes/nsoroRoutes.js, routes/nsoroUploadRoutes.js) are mounted at `/api/v1/nsoro`. User fields: `nsoroWelcomedAt`, `nsoroDevices`. Nothing in the code or the API uses the app's old name any more; keep it that way.
 
 These routes are versions of post create/delete, like/unlike, comments, follow/unfollow and profile edit/photo that take the user from the JWT and check ownership. They reuse the original handlers by overwriting `req.body.userId` / `req.query.userId` / `req.params.id` with the token's user.
-- Uploads (`POST /posts`, `PATCH /me/photo`) are in routes/instagramUploadRoutes.js, mounted before express-fileupload.
+- Uploads (`POST /posts`, `PATCH /me/photo`) are in routes/nsoroUploadRoutes.js, mounted before express-fileupload.
 - The original open routes (`/api/v1/posts`, `/users/:id/follow`, `/comments`...) are deliberately unchanged: GHGPT-main's Chatbot still calls them without a token. Lock them only once no client uses them.
 
 **Mongoose defaults**: write `default: Date.now` (the function), never `Date.now()`, which is evaluated once
@@ -219,10 +219,10 @@ routes (userId in the URL, no auth) are kept for existing clients.
   express-fileupload) stores to GridFS and returns `fileId`; the stream reads it back for vision models.
 - Also `PATCH /chats/:id/title`, `PATCH /chats/:id/pin`, `POST /chats/:id/email` (the transcript goes to the user's
   own email, rate limited to 5 per 15 min).
-- **Email** (`utils/ghgptMail.js`, same rules as instagramMail): `POST /events {type, deviceId}` sends the welcome
+- **Email** (`utils/ghgptMail.js`, same rules as nsoroMail): `POST /events {type, deviceId}` sends the welcome
   email the first time an account uses GH-GPT and a "new sign-in" alert for unknown devices (`ghgptWelcomedAt`,
   `ghgptDevices`). GH-GPT has its own opt-out, `User.ghgptEmailNotifications` (`GET /settings`,
-  `PATCH /settings/email`, one-click `/email/unsubscribe`), so it doesn't switch off Instagram emails. Security
+  `PATCH /settings/email`, one-click `/email/unsubscribe`), so it doesn't switch off Nsoro emails. Security
   alerts and requested transcripts use `force`.
 - `UserChatAi` used `default: Date.now()` (evaluated once at startup), so every chat got the server start time.
   It's now `Date.now`; chats created before the fix keep their wrong dates.
@@ -235,7 +235,6 @@ routes (userId in the URL, no auth) are kept for existing clients.
 - VAPID keys come from `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` if set. Otherwise they're generated once and stored in MongoDB (`appsettings`, `_id: 'vapid'`), so every environment on the same database shares them with no setup. Changing the keys breaks every existing subscription.
 - `GET /public-key` (no auth).
 - `POST /subscribe` | `/unsubscribe` | `/test` with `{ app: 'ghgpt'|'nsoro' }`, using the shared User JWT.
-- Nsoro's old key `'instagram'` is accepted and saved as `'nsoro'`. Old rows are migrated when routes/push.js loads.
 - `POST /ack { token }` (no auth) is the service worker's delivery receipt (utils/pushAck.js). It drives the two grey ticks and "Ringing…".
 - `/cleanbridge/subscribe` | `/unsubscribe` | `/test` use the CleanBridge JWT (`realm: 'cleanbridge'`).
 
@@ -245,7 +244,7 @@ routes (userId in the URL, no auth) are kept for existing clients.
 - `pushToAdmins` reaches admin accounts, the account whose email is `EMAIL_USER`, and `OWNER_ALERT_USERNAMES` (default `jayy`).
 
 **Where pushes come from**
-- `sendGhgptEmail` and `sendInstagramEmail` push the same news as the email, unless called with `push: false`.
+- `sendGhgptEmail` and `sendNsoroEmail` push the same news as the email, unless called with `push: false`.
 - `socialNotify` pushes every like, comment and follow, and every DM through `emailNewMessage`.
 - CleanBridge `notify()` pushes every notification.
 - The portfolio contact and order forms push to the owner.

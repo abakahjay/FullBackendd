@@ -2,8 +2,8 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const authMiddleware = require('../middleware/auth');
 const adminOnly = require('../middleware/adminOnly');
-const { unsubscribePage, unsubscribe, setEmailPreference, sendUpdate, authEvent } = require('../controllers/instagramController');
-const social = require('../controllers/instagramSocialController');
+const { unsubscribePage, unsubscribe, setEmailPreference, sendUpdate, authEvent } = require('../controllers/nsoroController');
+const social = require('../controllers/nsoroSocialController');
 
 const router = express.Router();
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
@@ -15,7 +15,7 @@ router.post('/events', authMiddleware, authEvent); // welcome / new-sign-in emai
 router.post('/updates', authMiddleware, adminOnly, sendUpdate);
 
 // Logged-in social actions (the user comes from the token, never the request body).
-// Uploads (POST /posts, PATCH /me/photo) live in routes/instagramUploadRoutes.js.
+// Uploads (POST /posts, PATCH /me/photo) live in routes/nsoroUploadRoutes.js.
 router.delete('/posts/:postId', authMiddleware, social.deletePost);
 router.patch('/posts/:postId/like', authMiddleware, social.likePost);
 router.patch('/posts/:postId/unlike', authMiddleware, social.unlikePost);

@@ -2293,7 +2293,6 @@ b59e59230a92854569661d3a8ff5f8d6f83c1097 public/images/pngs
 62b50dbe56489dafd75db123058cf5f5de4a034d public/images/pngs/facebook.png
 7a7fe45f48d98545d3b2566030408ac01c6f8501 public/images/pngs/favicon.png
 0071e7e8474da25f679af4868766732def9d6cb7 public/images/pngs/google.png
-32a5ee6335aad3b6255df9fe88b8f7c16feb9520 public/images/pngs/instagram.png
 149c395e2e8b1bf18ef7bc5c715bfc6d4edec7c5 public/images/pngs/mastercard.png
 a9fbfa33c96ad85e0b5d9519c0daaf8e8da15127 public/images/pngs/paypal.png
 1a236195d085f6c03551629f64f085ff7176315f public/images/pngs/tiktok.png
