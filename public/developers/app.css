@@ -166,3 +166,16 @@ pre.snippet { background: var(--bg); border: 1px solid var(--line); border-radiu
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--raised); border: 1px solid var(--line); color: var(--ink); padding: 10px 16px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; z-index: 60; max-width: calc(100% - 32px); }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+
+/* Addresses stay on one line (no breaks inside a slug like "blessed-abakah"):
+   cut with an ellipsis in lists, scrollable where there's a Copy button. */
+.url-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.copy.url { display: block; white-space: nowrap; overflow-x: auto; overflow-wrap: normal; scrollbar-width: thin; }
+.kv dd:has(> .copy.url) { overflow-wrap: normal; }
+a.card { color: inherit; transition: border-color .15s; }
+a.card:hover { text-decoration: none; border-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { a.card { transition: none; } }
+@media (max-width: 860px) {
+  .kv dt { margin-top: 6px; }
+  .kv > .btn { justify-self: start; }
+}

@@ -85,6 +85,9 @@ async function api(path, { method = "GET", json } = {}) {
 
 const go = (hash) => { if (window.location.hash !== hash) window.location.hash = hash; else render(); };
 const state = { me: null, apps: null };
+// Show API addresses on the server this page came from (the API's ORIGIN setting may name
+// another host, e.g. production while you run it locally).
+const withOrigin = (a) => (a && a.slug ? { ...a, api_base: `${ORIGIN}/api/v1/apps/${a.slug}`, docs_url: `${ORIGIN}/api/v1/apps/${a.slug}/docs` } : a);
 
 // ---------- shared UI pieces ----------
 function errorBox(err) { return el("p", { class: "alert alert-bad", role: "alert", text: err.message }); }
@@ -130,10 +133,13 @@ function topbar() {
 
 // ---------- landing ----------
 function landing(section) {
+  // Short lines so the address never runs off the edge of the box.
   const snippet = el("pre", {},
-    el("span", { class: "k", text: "await" }), " fetch(", el("span", { class: "s", text: '"https://fullbackendd.onrender.com/api/v1/apps/my-shop/data/products"' }), ", {\n",
+    el("span", { class: "k", text: "const" }), " API = ", el("span", { class: "s", text: `"${ORIGIN}"` }), "\n",
+    "  + ", el("span", { class: "s", text: '"/api/v1/apps/my-shop"' }), ";\n\n",
+    el("span", { class: "k", text: "await" }), " fetch(", el("span", { class: "s", text: "`${API}/data/products`" }), ", {\n",
     "  headers: { ", el("span", { class: "s", text: '"X-App-Key"' }), ": ", el("span", { class: "s", text: '"pk_…"' }), " }\n",
-    "});\n", el("span", { class: "muted", text: "// → { items: [...], page: 1, total: 42 }" }));
+    "});\n", el("span", { class: "muted", text: "// → { items: [...], total: 42 }" }));
   const feat = (ic, title, text) => el("div", { class: "card" }, icon(ic), el("h3", { text: title }), el("p", { text }));
   const page = el("div", {},
     el("section", { class: "wrap hero" },
@@ -255,7 +261,7 @@ function reset(params) {
 
 // ---------- dashboard shell ----------
 async function loadApps(force) {
-  if (!state.apps || force) state.apps = (await api("/apps")).items;
+  if (!state.apps || force) state.apps = (await api("/apps")).items.map(withOrigin);
   return state.apps;
 }
 function shell(active, content) {
@@ -268,6 +274,7 @@ function shell(active, content) {
     el("a", { href: "#/profile", class: active === "profile" ? "active" : "" }, "Profile"),
     el("a", { href: "/api-docs", target: "_blank", rel: "noopener" }, "API reference"));
   main.replaceChildren(el("div", { class: "dash" }, side, el("div", { class: "content" }, content)));
+  window.scrollTo(0, 0);
 }
 const head = (title, sub, ...actions) => el("div", { class: "page-head" }, el("div", {}, el("h1", { text: title }), sub ? el("p", { text: sub }) : null), el("div", { class: "row" }, ...actions));
 
@@ -275,7 +282,7 @@ async function home() {
   const apps = await loadApps();
   const cards = apps.length
     ? el("div", { class: "grid-3" }, ...apps.map((a) => el("a", { class: "card", href: `#/apps/${a.id}/overview` },
-      el("h3", { text: a.name }), el("p", { class: "mono small", text: a.api_base }),
+      el("h3", { text: a.name }), el("p", { class: "mono small url-line", title: a.api_base, text: `/apps/${a.slug}` }),
       el("p", { class: "small", text: `${a.collections.length} collection(s) · ${a.frontend_urls.length} frontend URL(s)` }))))
     : el("div", { class: "card empty" }, el("h3", { text: "No apps yet" }), el("p", { text: "Create your first app to get an API." }), el("a", { class: "btn btn-primary", href: "#/new" }, "Create an app"));
   shell("home", el("div", { class: "stack" }, head(`Welcome${state.me?.name ? `, ${state.me.name}` : ""}`, "Your apps on FullBackend.", el("a", { class: "btn btn-primary", href: "#/new" }, "New app")), cards));
@@ -315,14 +322,14 @@ const TABS = [["overview", "Overview"], ["frontends", "Frontend URLs"], ["apis",
 async function appPage(id, tab) {
   const apps = await loadApps();
   let app = apps.find((a) => a.id === id);
-  if (!app) { app = await api(`/apps/${encodeURIComponent(id)}`); }
+  if (!app) { app = withOrigin(await api(`/apps/${encodeURIComponent(id)}`)); }
   const tabs = el("nav", { class: "tabs", "aria-label": "App sections" }, ...TABS.map(([k, label]) => el("a", { href: `#/apps/${id}/${k}`, class: tab === k ? "active" : "", "aria-current": tab === k ? "page" : null }, label)));
   const body = el("div", { class: "stack" });
-  shell(id, el("div", {}, head(app.name, app.description || app.api_base, el("a", { class: "btn btn-sm", href: app.docs_url, target: "_blank", rel: "noopener" }, "Live docs")), tabs, body));
+  shell(id, el("div", {}, head(app.name, app.description, el("a", { class: "btn btn-sm", href: app.docs_url, target: "_blank", rel: "noopener" }, "Live docs")), tabs, body));
   const views = { overview, frontends, apis, usage, settings };
   await (views[tab] || overview)(app, body);
 }
-const replaceApp = (app) => { state.apps = state.apps.map((a) => (a.id === app.id ? app : a)); };
+const replaceApp = (app) => { app = withOrigin(app); state.apps = state.apps.map((a) => (a.id === app.id ? app : a)); };
 
 function overview(app, body) {
   const secret = sessionStorage.getItem(`secret:${app.id}`);
@@ -334,16 +341,16 @@ function overview(app, body) {
       el("p", { class: "small muted", text: "Use it only on a server (it acts as admin of this app). Never put it in frontend code: requests from a browser with it are refused." })));
   }
   const kv = (k, v, c) => [el("dt", { text: k }), el("dd", {}, v), c || el("span")];
-  const pk = el("code", { class: "copy", text: app.publishable_key });
+  const pk = el("code", { class: "copy url", text: app.publishable_key });
   body.append(
     el("div", { class: "card" }, el("dl", { class: "kv" },
-      ...kv("API base", el("code", { class: "copy", text: app.api_base }), el("button", { class: "btn btn-sm", type: "button", onclick: () => copy(app.api_base) }, "Copy")),
+      ...kv("API base", el("code", { class: "copy url", text: app.api_base }), el("button", { class: "btn btn-sm", type: "button", onclick: () => copy(app.api_base) }, "Copy")),
       ...kv("Publishable key", pk, el("button", { class: "btn btn-sm", type: "button", onclick: () => copy(app.publishable_key) }, "Copy")),
-      ...kv("Secret key", el("code", { class: "copy", text: app.secret_key_hint }), el("a", { class: "btn btn-sm", href: `#/apps/${app.id}/settings` }, "Rotate")),
+      ...kv("Secret key", el("code", { class: "copy url", text: app.secret_key_hint }), el("a", { class: "btn btn-sm", href: `#/apps/${app.id}/settings` }, "Rotate")),
       ...kv("Features", el("span", { class: "row" },
         el("span", { class: `pill ${app.features.auth ? "pill-good" : ""}`, text: `User accounts ${app.features.auth ? "on" : "off"}` }),
         el("span", { class: `pill ${app.features.files ? "pill-good" : ""}`, text: `File uploads ${app.features.files ? "on" : "off"}` }))),
-      ...kv("Frontend URLs", el("span", { text: app.frontend_urls.join(", ") || "None yet" }), el("a", { class: "btn btn-sm", href: `#/apps/${app.id}/frontends` }, "Edit")))),
+      ...kv("Frontend URLs", app.frontend_urls.length ? el("div", {}, ...app.frontend_urls.map((u) => el("div", { class: "url-line", title: u, text: u }))) : el("span", { text: "None yet" }), el("a", { class: "btn btn-sm", href: `#/apps/${app.id}/frontends` }, "Edit")))),
     el("div", { class: "card stack" }, el("h3", { text: "Quick start" }),
       el("p", { class: "muted small", text: "From your frontend (React, Vue, plain JS, React Native):" }),
       el("pre", { class: "snippet", text: quickStart(app) })),
@@ -370,7 +377,7 @@ function frontends(app, body) {
   const list = el("div", { class: "list" });
   let urls = [...app.frontend_urls];
   const draw = () => list.replaceChildren(...(urls.length ? urls : [null]).map((u) => (u
-    ? el("div", { class: "list-item" }, el("span", { class: "grow mono", text: u }),
+    ? el("div", { class: "list-item" }, el("span", { class: "grow mono url-line", title: u, text: u }),
       el("button", { class: "btn btn-sm btn-danger", type: "button", onclick: () => { urls = urls.filter((x) => x !== u); draw(); } }, "Remove"))
     : el("div", { class: "list-item muted" }, "No frontend URLs yet."))));
   draw();
@@ -416,7 +423,7 @@ function collectionCard(app, col, onRemove) {
       el("tbody", {}, ...col.fields.map((f) => el("tr", {},
         el("td", { class: "mono", text: f.name }), el("td", { text: f.type }),
         el("td", { class: "muted", text: [f.required ? "required" : "optional", f.max_length ? `max ${f.max_length} chars` : "", f.values ? f.values.join(" | ") : "", f.min !== undefined ? `min ${f.min}` : "", f.max !== undefined ? `max ${f.max}` : ""].filter(Boolean).join(" · ") })))))),
-    el("p", { class: "small muted mono", text: `GET/POST ${base} · GET/PATCH/DELETE ${base}/:id` }));
+    el("div", { class: "small muted mono" }, el("div", { class: "url-line", title: base, text: `GET, POST  ${base}` }), el("div", { class: "url-line", title: `${base}/:id`, text: `GET, PATCH, DELETE  ${base}/:id` })));
 }
 
 function apis(app, body) {
@@ -593,7 +600,7 @@ async function render() {
     try { state.me = await api("/auth/me"); } catch { /* signed out */ }
   }
   topbar();
-  document.querySelectorAll("[data-public]").forEach((a) => a.classList.toggle("hidden", Boolean(state.me) && parts[0] && !["about", "features", "how"].includes(parts[0])));
+  document.querySelectorAll("[data-public]").forEach((a) => a.classList.toggle("hidden", Boolean(state.me && parts[0] && !["about", "features", "how"].includes(parts[0]))));
   const needsAuth = ["apps", "new", "profile"].includes(parts[0]);
   if (needsAuth && !state.me) return signIn();
   if (state.me && ["signin", "signup"].includes(parts[0])) return go("#/apps");
