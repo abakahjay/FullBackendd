@@ -67,6 +67,7 @@ const collectRoutes = (stack, prefix = "", inherited = [], out = []) => {
 // ---------- what a route needs ----------
 
 const AUTH = [
+    { test: (n) => n === "cropguardAuth", scheme: "cropguardBearer", label: "GhanaCropGuard login (Bearer token from /api/v1/cropguard/auth/login)" },
     { test: (n) => n === "cleanbridgeAuthMiddleware", scheme: "cleanbridgeBearer", label: "CleanBridge login (Bearer token from /api/v1/cleanbridge/auth/login)" },
     { test: (n) => n === "seedbridgeAuthMiddleware", scheme: "seedbridgeBearer", label: "SeedBridge login (Bearer token from /api/v1/seedbridge/auth/login)" },
     { test: (n) => n === "authenticationMiddleware", scheme: "bearerAuth", label: "Shared login (Bearer token from /api/v1/auth/login)" },
@@ -165,6 +166,8 @@ const summaryFor = (method, path, handler) => {
 const TAGS = [
     [/^\/api\/v1\/cleanbridge\/([^/]+)/, (m) => `CleanBridge · ${cap(m[1])}`],
     [/^\/api\/v1\/seedbridge\/([^/]+)/, (m) => `SeedBridge · ${cap(m[1])}`],
+    [/^\/api\/v1\/cropguard\/(auth|predictions|admin)/, (m) => `GhanaCropGuard · ${cap(m[1])}`],
+    [/^\/api\/v1\/cropguard/, () => "GhanaCropGuard · System"],
     [/^\/api\/v1\/auth\/google/, () => "Auth · Google sign-in"],
     [/^\/api\/v1\/auth/, () => "Auth (shared users)"],
     [/^\/api\/(contact|order)/, () => "Portfolio"],
@@ -298,7 +301,7 @@ const buildSpec = (app, { serverUrl } = {}) => {
             description: [
                 "Every route on this server, generated live from the Express router - so it is always up to date.",
                 "",
-                "**Apps:** CleanBridge GH (`/api/v1/cleanbridge/*`), SeedBridge (`/api/v1/seedbridge/*`), the shared user API (`/api/v1/auth`, products, cart, orders, …) and the portfolio (`/api/contact`, `/api/order`).",
+                "**Apps:** CleanBridge GH (`/api/v1/cleanbridge/*`), SeedBridge (`/api/v1/seedbridge/*`), GhanaCropGuard AI (`/api/v1/cropguard/*`, errors as `{ \"detail\": { \"code\", \"message\" } }`), the shared user API (`/api/v1/auth`, products, cart, orders, …) and the portfolio (`/api/contact`, `/api/order`).",
                 "",
                 "**Logging in:** call the app's `/auth/login`, copy `token` from the response, click **Authorize** and paste it into the matching scheme. Each app has its own users and tokens.",
                 "",
@@ -315,6 +318,7 @@ const buildSpec = (app, { serverUrl } = {}) => {
                 bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT", description: "Shared users: token from POST /api/v1/auth/login" },
                 cleanbridgeBearer: { type: "http", scheme: "bearer", bearerFormat: "JWT", description: "CleanBridge: token from POST /api/v1/cleanbridge/auth/login" },
                 seedbridgeBearer: { type: "http", scheme: "bearer", bearerFormat: "JWT", description: "SeedBridge: token from POST /api/v1/seedbridge/auth/login" },
+                cropguardBearer: { type: "http", scheme: "bearer", bearerFormat: "JWT", description: "GhanaCropGuard: access_token from POST /api/v1/cropguard/auth/login" },
                 cookieAuth: { type: "apiKey", in: "cookie", name: "token" },
             },
         },

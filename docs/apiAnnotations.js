@@ -11,6 +11,7 @@
 
 const CB = "/api/v1/cleanbridge";
 const SB = "/api/v1/seedbridge";
+const CG = "/api/v1/cropguard";
 
 const ID = "66f2a1c9e4b0a1b2c3d4e5f6";
 const TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
@@ -198,6 +199,43 @@ const notes = {
         query: { token: TOKEN },
         response: "event: message\ndata: {\"title\":\"New pickup request\",\"kind\":\"new_request\",\"pickupId\":\"66f2...\"}\n\n",
         responseLabel: "text/event-stream",
+    },
+
+    // ======================= GhanaCropGuard AI =======================
+    [`POST ${CG}/auth/register`]: {
+        summary: "Create a CropGuard account",
+        description: "Password: 8+ characters with letters and numbers. `age_confirmed` and `accept_terms` must be `true`. Validation errors are 422 with `detail.fields`.",
+        body: { email: "ama.owusu@example.com", password: "Cassava2026", full_name: "Ama Owusu", region: "Ashanti", age_confirmed: true, accept_terms: true },
+        status: 201,
+        response: { access_token: TOKEN, token_type: "bearer", expires_in: 43200, user: { id: ID, email: "ama.owusu@example.com", full_name: "Ama Owusu", role: "user", region: "Ashanti", preferred_language: "en", has_password: true, google_linked: false } },
+    },
+    [`POST ${CG}/auth/login`]: {
+        summary: "Sign in (CropGuard)",
+        body: { email: "ama.owusu@example.com", password: "Cassava2026" },
+        response: { access_token: TOKEN, token_type: "bearer", expires_in: 43200, user: { id: ID, email: "ama.owusu@example.com", role: "user" } },
+    },
+    [`POST ${CG}/auth/forgot-password`]: {
+        summary: "Email a password-reset link (CropGuard)",
+        description: "Same answer whether or not the account exists. The link is `<redirect_uri>#token=…&email=…`, valid 30 minutes, single use. `redirect_uri` must be on ALLOWED_REDIRECT_DOMAINS or CROPGUARD_CLIENT_URL's origin; it defaults to CROPGUARD_CLIENT_URL/reset-password.",
+        body: { email: "ama.owusu@example.com", redirect_uri: "https://ghanacropguard.onrender.com/reset-password" },
+        response: { message: "If an account exists for that email, we have sent a link to reset the password." },
+    },
+    [`POST ${CG}/auth/reset-password`]: {
+        summary: "Choose a new password from a reset link (CropGuard)",
+        description: "Signs out every existing session. A wrong or expired token is 400 `invalid_reset_link`.",
+        body: { email: "ama.owusu@example.com", token: "4f9c2a7d1e…(64 hex)", new_password: "Maize2026new" },
+        response: { message: "Your password has been reset. You can now sign in." },
+    },
+    [`POST ${CG}/predictions`]: {
+        summary: "Classify a leaf photo",
+        description: "multipart/form-data with one `image` (JPEG/PNG/WebP, max 8 MB). Returns the top-3 classes, guidance and warnings. 503 `model_unavailable` when no model is loaded - never a fake result.",
+        upload: true,
+        fileField: "image",
+        status: 201,
+    },
+    [`GET ${CG}/predictions/:predictionId/image`]: {
+        summary: "Photo of a prediction (signed link)",
+        description: "Use the `image_url` from a prediction as-is; its `sig` is valid for an hour. No Authorization header needed.",
     },
 
     // ======================= Pages & misc =======================
