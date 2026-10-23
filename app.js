@@ -420,6 +420,12 @@ app.get('/resetPassword', (req, res) => {
     res.sendFile(path.join(__dirname, 'static', 'resetPassword.html'));
 });
 
+// Hosted "forgot password" page (?app=shared|seedbridge|cleanbridge&return=), for
+// frontends without their own; its email links to /resetPassword above.
+app.get('/forgotPassword', (req, res) => {
+    res.sendFile(path.join(__dirname, 'static', 'forgotPassword.html'));
+});
+
 app.get('/datasuccess', (req, res) => {
     res.sendFile(path.join(__dirname, 'static', 'success.html'));
 });
