@@ -256,6 +256,16 @@ routes (userId in the URL, no auth) are kept for existing clients.
 - Each frontend's service worker shows the notification. It skips it while the app is focused, except for `tag: 'test'`.
 - iPhone/iPad only allow web push for apps added to the Home Screen.
 
+## Security baseline (every app)
+
+- **CORS** (`utils/corsPolicy.js`): every origin may call the API (the apps use Bearer tokens), but `Access-Control-Allow-Credentials` is sent only for our own frontends: localhost, `ALLOWED_REDIRECT_DOMAINS`, the apps' client URLs, the known sites in `KNOWN_FRONTENDS` and `CORS_ORIGINS`. A new frontend that sends cookies (`credentials: "include"`, `withCredentials`) must be added to `CORS_ORIGINS`, or its cookie calls fail in the browser.
+- **`trust proxy`** is set when `RENDER` (or `TRUST_PROXY`) is present. Without it every visitor on Render has the proxy's IP, so every `express-rate-limit` limiter would be one shared bucket.
+- **Rate limits**: `/api/` overall per IP (`API_RATE_LIMIT_PER_15_MIN`, 3000); failed logins per IP and route (`middleware/authLimiter.js`, `LOGIN_FAILURES_PER_15_MIN`, 25; only failures count) on the shared, SeedBridge and CleanBridge logins and the shared `PATCH /api/v1/auth/:userId`; sign-ups per IP (`SIGNUPS_PER_HOUR`, 60). Ghana's mobile networks put many users behind one IP, so keep these generous. CropGuard has its own limiter.
+- The shared login answers "Invalid email or password." for both cases (no account enumeration). `POST /api/v1/auth/userId` never returns the password hash.
+- `express-fileupload` is capped (`MAX_UPLOAD_MB`, 50; 10 files) because it buffers in memory.
+- In production, unexpected 500s (no `statusCode` set by our code) answer a generic message; the real one is logged.
+- **Known open item, kept by the owner's choice**: the shared Google login (`GET /api/v1/auth/google` without `?app=`) accepts any `redirect_uri` (an open redirect for the login token; see the note in `routes/googleAuth.js`). CleanBridge and CropGuard use allowlisted redirects.
+
 ## Email delivery (every app)
 
 All mail goes through `utils/mailTransport.js` `deliver()` (used by `utils/sendEmail.js` and `utils/cleanbridgeMail.js`).
@@ -387,3 +397,67 @@ Rules worth knowing before changing things:
   (`PUT /auth/me/live-location`) counts as live for 10 minutes on the pickup page and 30 minutes on the admin map.
 - Aggregation pipelines need explicit `mongoose.Types.ObjectId(...)` casts (`find()` casts automatically,
   `aggregate()` does not).
+
+## GhanaCropGuard AI (`/api/v1/cropguard/*`)
+
+Backend for GhanaCropGuard AI, which classifies a photo of a cashew, cassava, maize or tomato leaf into one of 22 CCMT classes. Its clients are a React + Vite web app and an Expo app (repo `Desktop/VS Projects/ghanacropguard-ai`, which also has the ML pipeline that produces the model). It replaced that repo's FastAPI backend and keeps the FastAPI API contract, so the clients only changed their base path. Results are a preliminary assessment, **not a diagnosis**; keep that framing in any text.
+
+**One router owns the whole namespace.** `routes/cropguard.js` is mounted in app.js **before** every global body parser, express-fileupload, xss-clean and mongo-sanitize, and it never calls `next()` past its own 404. So it does its own work:
+- security headers (`helmet`)
+- JSON (64 kb) and multipart (multer memory storage, `image` field, `CROPGUARD_MAX_UPLOAD_MB`) parsing
+- an error handler that answers `{ detail: { code, message, fields? } }`, the shape the clients expect (not `{ msg }`)
+
+Throw `fail(status, code, message)` (`utils/cropguard.js`). Validation goes through `Checker` and gives 422 `validation_error` with `fields[{ field, message }]`. Since there is no sanitizer in front, every input is type-checked before it reaches a query (`isStr`, explicit enums). The 401/400 rule matches the other apps: wrong current password and similar are 400; only `middleware/cropguardAuth.js` and failed login send 401.
+
+**Auth and isolation.**
+- Users are in `models/CropGuardUser.js` (email, `passwordHash` with bcrypt 12, role `user`/`admin`, `tokenVersion`, age/terms consent timestamps).
+- JWTs are `{ sub, role, tv, type: "access", app: "cropguard" }`, signed with the shared `JWT_SECRET`. They deliberately have no `userId` claim, so the shared `middleware/auth.js` cannot accept them, and `cropguardAuth` rejects any token without `app: "cropguard"` or whose `tv` is not the user's current `tokenVersion`.
+- Password change, password reset, `POST /auth/logout-all` and admin deactivation bump `tokenVersion`, which revokes every existing token.
+- Forgot/reset password is CropGuard's own (`forgotPassword`/`resetPassword` in `controllers/cropguardAuth.js`), not `utils/passwordReset.js`, because it needs the `{ detail }` errors, the 8-character letters+digits policy and session revocation. Same mechanics: generic answer, SHA-256-hashed 32-byte token, 30 min, single use. The link puts the token in the URL **fragment** (`<redirect_uri>#token=&email=`) so it never reaches a server log. Emails go through `utils/cropguardMail.js` → `utils/mailTransport.js`.
+- Google sign-in: `GET /api/v1/auth/google?app=cropguard&redirect_uri=&consent=1` in `routes/googleAuth.js`. The state is a signed 10-minute JWT (`purpose: "cropguard-oauth"`), so the consent flag and redirect can't be edited. A new Google account is only created with `consent=1` (the web sign-up page sends it after the boxes are ticked). An existing email is linked. `CROPGUARD_ADMIN_EMAILS` become admins through Google only. The token returns as `#token=`, errors as `#error=`. Google-only users have no `passwordHash`; they delete the account with `{ confirm: "DELETE" }` and add a password through forgot-password.
+- Redirects (Google, reset links) must pass `isAllowedRedirect()` (`utils/cropguard.js`): `ALLOWED_REDIRECT_DOMAINS` or the origin of `CROPGUARD_CLIENT_URL`.
+- Bearer header only, no cookies: the web app keeps the token in localStorage behind a strict CSP.
+- Rate limits use an in-process sliding window (`rateLimit()` in `utils/cropguard.js`): auth per IP, failed logins per email (10 per 15 min), predictions per user. The IP is the last `X-Forwarded-For` entry (Render appends the real client), because app.js does not set `trust proxy`.
+- Other users' records give 404, not 403.
+- Photos are served from a signed link: `GET /predictions/:id/image?sig=` with a 1 h JWT `{ pid, type: "image", app: "cropguard" }`, so `<img>` tags work without a header.
+
+**Model serving** (`utils/cropguardInference.js`). `onnxruntime-node` runs in this process on CPU. It is required lazily inside `Classifier.load`, so a platform without the native module loses only CropGuard predictions. Loading:
+- The bundle (`model.onnx` + `meta.json`) is read once when the router is first required, from `CROPGUARD_MODEL_DIR` (default `data/cropguard/model`).
+- `model.onnx` is checked against the sha256 in `meta.json`, and a warm-up run checks the output size against the class list.
+- If anything fails, the prediction routes answer **503 `model_unavailable`**, never a fake prediction, and `/health` reports `degraded`.
+
+Preprocessing (`utils/cropguardPreprocess.js`) is a line-for-line port of the ML repo's `cropguard_ml/preprocess.py`:
+- sharp only decodes (EXIF rotate, alpha dropped, sRGB).
+- The resize is Pillow's bicubic `resample.c` 8-bit path (fixed-point coefficients, horizontal then vertical pass).
+- Python's round-half-even is used for sizes and the crop offset.
+- Normalisation is done in float32.
+
+It matched Python bit for bit on CCMT photos and edge cases (odd sizes, RGBA, grayscale, EXIF orientation 6, WebP), so keep it in sync with `preprocess.py`; sharp's own resize is close but not identical. Package `onnxruntime-node` is pinned and intentionally not in `allowScripts`: its postinstall only downloads optional CUDA binaries, and the CPU binaries are bundled.
+
+**Data.**
+- `CropGuardPrediction` stores failed requests too (`status: "failed"`, `errorCode`), for the admin statistics.
+- `CropGuardModelVersion` is upserted for the loaded bundle at startup. It keeps `metaJson` as text because `meta.json` has keys with dots.
+- `CropGuardAuditEvent` records registrations, password changes, deletions and admin changes.
+- Photos are re-encoded to JPEG (EXIF/GPS dropped, at most 1024 px on the short side) into the GridFS bucket `cropguardImages`, not the shared `uploads` bucket.
+- `purgeExpired()` deletes unsaved photos older than `CROPGUARD_RETENTION_DAYS`, at startup and every 24 h.
+- Startup tasks (model version, `CROPGUARD_BOOTSTRAP_ADMIN_EMAIL/PASSWORD`, retention) run on `mongoose.connection` `open` and never throw.
+
+**Content.** `data/cropguard/content.json` holds the class list, guidance text, sources, warning texts, the disclaimer, regions and the policy defaults. It was generated from the old Python backend and is now the source of truth. Its rules are in the ML repo's `docs/CONTENT_POLICY.md`: visible signs and field hygiene only, no pesticide names or doses, real organisations only, and refer chemical decisions to a MoFA extension officer. `test/cropguard/unit.test.js` enforces them. If the ML repo's `labels.py` changes, update `classes` here too.
+
+**Tests**: `npm run test:cropguard` (node:test).
+- `test/cropguard/api.test.js` starts the real `app.js` as a child process and calls it over HTTP. It refuses to run unless `CROPGUARD_TEST_MONGO_URI` is a local MongoDB whose database name ends in `_test` or `_tmp`. `mongodb-memory-server` run outside this repo works.
+- It uses `test/cropguard/tiny-model/`, a real 562-byte ONNX graph: mostly green → `cassava_mosaic`, mostly red → `cashew_red_rust`.
+- It also checks that CleanBridge still answers with `{ msg }` and that `/api-docs.json` still lists every app.
+- Admin CLI: `node scripts/cropguardCreateAdmin.js <email>` (prompts for the password).
+
+## Skills to use
+
+Load these skills (they are installed for this user) before working in this repo:
+- `/vibe-code-legal-audit` – security, privacy and legal hardening of the backend and every app that calls it
+- `/solveweb` – debugging and fixing web/API problems
+- `/web-across-platform` – make sure every change still works for all clients: the web apps, the Expo mobile app and the static pages
+- `/impeccable` – UI/UX quality, accessibility, responsive behaviour, polish and audits
+- `/design-taste-frontend` – art direction for pages and app screens
+- `/emil-design-eng` – interaction details, motion and component craft
+
+The FullBackendd API is shared by many live apps (Nsoro, GH-GPT, CleanBridge, SeedBridge, GhanaCropGuard web and mobile, the portfolio and the static MTN/AFA pages). Before changing any route, middleware, error shape, CORS, auth or rate limit, grep those apps' folders in `Desktop/VS Projects` for what they use, and keep each of them working.
