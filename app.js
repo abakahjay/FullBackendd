@@ -140,6 +140,11 @@ app.use("/api/v1/auth/", uploadRoutes);
 const SEEDBRIDGE_WEBHOOK_PATH = '/api/v1/seedbridge/payments/webhook';
 app.use(SEEDBRIDGE_WEBHOOK_PATH, express.raw({ type: 'application/json' }));
 
+// GhanaCropGuard AI (crop disease photo classifier). Mounted before every global
+// body parser/sanitizer: the router parses, validates and secures its own
+// namespace and answers every request under it (routes/cropguard.js).
+app.use('/api/v1/cropguard', require('./routes/cropguard.js'));
+
 app.use((req, res, next) => {
     if (req.originalUrl === SEEDBRIDGE_WEBHOOK_PATH) {
         return next(); // already raw-parsed above; don't let this overwrite req.body
