@@ -103,12 +103,16 @@ require("./utils/passport"); // Passport configuration file
 
 
 
-app.use(cors({
-    origin: true,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));//This allows connections from other ports
+// Render (and any host with TRUST_PROXY=<hops>) sits behind one proxy: without
+// this, req.ip is the proxy for every visitor and all IP rate limits are shared.
+if (process.env.TRUST_PROXY || process.env.RENDER) {
+    app.set('trust proxy', Number(process.env.TRUST_PROXY) || 1);
+}
+app.disable('x-powered-by');
+
+// Any origin may call the API with a Bearer token; cookies are honoured only for
+// our own frontends (utils/corsPolicy.js - add new ones to CORS_ORIGINS).
+app.use(cors(require('./utils/corsPolicy').corsOptions));
 // The hand-written swagger.yaml (portfolio /contact and /order) keeps its own
 // page. Mounted before /api-docs so that route doesn't swallow it.
 const YAML = require('yamljs');
@@ -233,9 +237,13 @@ app.use(helmet());
 
 
 //Other middleware
+// Per client IP (see trust proxy above). Generous: ~3 requests a second, sustained.
 const apiLimiter = rateLimiter({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100000, // limit each IP to 100 requests per windowMs
+    max: Number(process.env.API_RATE_LIMIT_PER_15_MIN) || 3000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { msg: 'Too many requests. Please slow down and try again shortly.' },
 })
 app.use("/api/", apiLimiter);
 
@@ -253,7 +261,12 @@ app.use((req, res, next) => {
     return mongoSanitize()(req, res, next);
 });
 app.use(cookieParser(process.env.JWT_SECRET));
-app.use(fileUpload());
+// Uploads are held in memory: cap them so one request can't exhaust the server.
+app.use(fileUpload({
+    limits: { fileSize: (Number(process.env.MAX_UPLOAD_MB) || 50) * 1024 * 1024, files: 10 },
+    abortOnLimit: true,
+    responseOnLimit: JSON.stringify({ msg: 'File is too large.' }),
+}));
 
 
 // Parse incoming JSON requests
@@ -405,8 +418,14 @@ app.get('/font-awesome/css/all.min.css', (req, res) => {
 //This is for the Ai Chatbot
 app.post('/api/chat', (req, res) => {
     const userMessage = req.body.message;
+    // Passed as one argv entry (no shell), but still bounded: it starts a process per request.
+    if (typeof userMessage !== 'string' || !userMessage.trim() || userMessage.length > 2000) {
+        return res.status(400).json({ msg: 'message must be text of at most 2000 characters' });
+    }
 
     const python = spawn('C:/ProgramData/anaconda4/python.exe', ['./chatbot/respond.py', userMessage]);//This is used to run python in javascript
+    python.on('error', () => !res.headersSent && res.status(503).json({ msg: 'Chatbot is not available on this server.' }));
+    setTimeout(() => python.kill(), 30000).unref();
 
     python.stdout.on('data', (data) => {
         res.json({ reply: data.toString() });//This will send the printed message

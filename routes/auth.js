@@ -25,16 +25,18 @@ const {
 
 
 const { forgotLimiter, resetLimiter } = require("../middleware/passwordResetLimiter.js");
+const { loginLimiter, signupLimiter } = require("../middleware/authLimiter.js");
 router.post("/forgot-password", forgotLimiter, forgotPassword);
 router.post("/reset-password/:token", resetLimiter, resetPassword);
 router.post("/reset-password", resetLimiter, resetPassword);
 
-router.route("/signup").post(signUp)
-router.route("/login").post(login);
+router.route("/signup").post(signupLimiter, signUp)
+router.route("/login").post(loginLimiter, login);
 router.route("/logout").post(logout);
 router.route("/dashboard").get(authMiddleware,dashboard);
 router.route("/userId").post(userId);
-router.route("/:userId").patch(changePassword);
+// Checks the old password, so it is rate limited like a login.
+router.route("/:userId").patch(loginLimiter, changePassword);
 router.route('/verify-email').get(verifyEmail)
 
 module.exports = router;

@@ -94,15 +94,15 @@ const login = async (req, res) => {
     // Find user by email
     const user = await User.findOne({ email })//.select('-password');
 
+    // One message for both cases, so the login can't be used to find out who has an account.
     if (!user) {
-        throw new UnauthenticatedError("Invalid email.");
+        throw new UnauthenticatedError("Invalid email or password.");
     }
     //Check if password is correct
     const isPasswordCorrect = await user.comparePasswords(password)
-    console.warn("Password Correct:", isPasswordCorrect);  // Log result of password check
     //If not throw an error
     if (!isPasswordCorrect) {
-        throw new UnauthenticatedError('Invalid Password');
+        throw new UnauthenticatedError("Invalid email or password.");
     }
     const token = user.createJWT();
     user.tokens.push(token); // Add token to the tokens array
@@ -151,8 +151,10 @@ const userId = async (req, res) => {
     } else {
         cookie = req.cookies[`authToken-${userId}`]
     }
-    console.log('User Cookie:', req.cookies[`User-${userId}`])
-    res.status(StatusCodes.OK).json({ message: 'Successful', user: user, cookie: cookie, userTok });
+    // Never send the password hash (or log cookie contents).
+    const safeUser = user ? user.toObject() : user;
+    if (safeUser) delete safeUser.password;
+    res.status(StatusCodes.OK).json({ message: 'Successful', user: safeUser, cookie: cookie, userTok });
 }
 
 

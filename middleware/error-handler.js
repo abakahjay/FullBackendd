@@ -37,6 +37,13 @@ const errorHandlerMiddleware = (err, req, res, next) => {
     }
     customError.statusCode = StatusCodes.NOT_FOUND;
   }
+  // Unexpected crashes (no status chosen by our code) can carry internals - driver
+  // errors, file paths, keys in URLs - so production answers them generically.
+  // The real message is in the log above.
+  const unexpected = customError.statusCode >= 500 && !(err instanceof CustomAPIError) && !err.statusCode;
+  if (unexpected && process.env.NODE_ENV === 'production') {
+    customError.message = 'Something went wrong. Please try again later.';
+  }
   // return res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ err:err.message })
   return res.status(customError.statusCode).json({ msg: customError.message, secret:'',error: customError.message });
 }

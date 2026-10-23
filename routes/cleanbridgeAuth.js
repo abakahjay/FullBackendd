@@ -15,11 +15,12 @@ const {
     resetPassword,
 } = require("../controllers/cleanbridgeAuth.js");
 const { forgotLimiter, resetLimiter } = require("../middleware/passwordResetLimiter.js");
+const { loginLimiter, signupLimiter } = require("../middleware/authLimiter.js");
 
 // Google sign-in lives on the shared /api/v1/auth/google route with ?app=cleanbridge
 // (see routes/googleAuth.js).
-router.post("/signup", signUp);
-router.post("/login", login);
+router.post("/signup", signupLimiter, signUp);
+router.post("/login", loginLimiter, login);
 router.post("/forgot-password", forgotLimiter, forgotPassword);
 router.post("/reset-password/:token", resetLimiter, resetPassword);
 router.post("/reset-password", resetLimiter, resetPassword);
