@@ -75,7 +75,8 @@ function corsOptions(req, callback) {
         origin: true, // reflect: Bearer-token calls work from anywhere
         credentials: allowsCredentials(origin),
         methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allowedHeaders: ["Content-Type", "Authorization"],
+        // X-App-Key: developer-platform apps identify themselves with it (routes/platform.js).
+        allowedHeaders: ["Content-Type", "Authorization", "X-App-Key"],
         maxAge: 600,
     });
 }

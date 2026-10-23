@@ -149,6 +149,20 @@ app.use(SEEDBRIDGE_WEBHOOK_PATH, express.raw({ type: 'application/json' }));
 // namespace and answers every request under it (routes/cropguard.js).
 app.use('/api/v1/cropguard', require('./routes/cropguard.js'));
 
+// Developer platform: developers register apps (frontend URLs + data collections) and
+// get a generated API for each. Same rule as CropGuard: mounted before the global
+// parsers/sanitizers because it validates its own input (routes/platform.js).
+const platformRoutes = require('./routes/platform.js');
+app.use('/api/v1/platform', platformRoutes.platform);
+app.use('/api/v1/apps', platformRoutes.runtime);
+// The developer dashboard keeps a token in localStorage: only its own scripts may run.
+app.use('/developers', (req, res, next) => {
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    next();
+});
+
 app.use((req, res, next) => {
     if (req.originalUrl === SEEDBRIDGE_WEBHOOK_PATH) {
         return next(); // already raw-parsed above; don't let this overwrite req.body
