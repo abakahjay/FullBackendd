@@ -40,8 +40,8 @@ const modelInfo = async (req, res) => {
         validation_best: m.validation_best ?? null,
         intended_use: m.intended_use || "",
         dataset: m.dataset ?? null,
-        note: "test_metrics are from a held-out test split of the CCMT dataset. They describe "
-            + "historical performance on that data, not the correctness of live predictions.",
+        note: "These figures come from CCMT test photos the model never saw in training. They show "
+            + "how it did on that data, not whether any one live result is right.",
     });
 };
 
