@@ -3,7 +3,10 @@ const passport = require("passport");
 const crypto = require("crypto");
 const User = require("../models/User");
 const seedStarterTransactions = require("../utils/seedStarterTransactions");
+const jwt = require("jsonwebtoken");
 const { googleCallback: cleanbridgeGoogleCallback } = require("../controllers/cleanbridgeAuth");
+const { googleCallback: cropguardGoogleCallback } = require("../controllers/cropguardAuth");
+const { isAllowedRedirect: isAllowedCropguardRedirect } = require("../utils/cropguard");
 const {
     isAllowedRedirectUri,
     isAllowedCleanbridgeRedirect,
@@ -33,7 +36,34 @@ const DEFAULT_REDIRECT_URI = process.env.REDIRECT_URL
 // sent to attacker.example. Re-adding isAllowedRedirectUri here (swap the
 // import below) closes that hole at the cost of requiring each real
 // frontend's domain to be added to ALLOWED_REDIRECT_DOMAINS in .env.
+// GhanaCropGuard AI: its own CropGuardUser collection, an allowlisted redirect
+// (utils/cropguard.js isAllowedRedirect) and a signed, 10-minute state so the
+// consent flag and redirect can't be forged. ?consent=1 is sent by the sign-up
+// page once the age and terms boxes are ticked; without it only existing
+// accounts can sign in.
+const CROPGUARD_STATE = "cropguard-oauth";
+const cropguardState = (state) => {
+    try {
+        const s = jwt.verify(String(state || ""), process.env.JWT_SECRET, { algorithms: ["HS256"] });
+        return s.purpose === CROPGUARD_STATE ? s : null;
+    } catch {
+        return null;
+    }
+};
+
 router.get("/google", (req, res, next) => {
+    if (req.query.app === "cropguard") {
+        const redirectUri = req.query.redirect_uri;
+        if (typeof redirectUri !== "string" || !isAllowedCropguardRedirect(redirectUri)) {
+            return res.status(400).json({ detail: { code: "redirect_not_allowed", message: "Missing or disallowed redirect_uri." } });
+        }
+        const state = jwt.sign(
+            { purpose: CROPGUARD_STATE, redirectUri, consent: req.query.consent === "1" },
+            process.env.JWT_SECRET,
+            { expiresIn: 600, algorithm: "HS256" },
+        );
+        return passport.authenticate("google", { scope: ["profile", "email"], prompt: "select_account", state })(req, res, next);
+    }
     // CleanBridge GH signs users into its own CleanBridgeUser collection, and
     // (unlike the open flow below) only ever sends tokens to hosts on
     // ALLOWED_REDIRECT_DOMAINS. ?role=collector lets collectors sign up with Google.
@@ -70,6 +100,10 @@ router.get("/google", (req, res, next) => {
 // back with ?error=access_denied - send them back to the app with that error
 // instead of a bare 401 page.
 const cleanbridgeCancelled = (req, res, next) => {
+    const cg = req.query.error && cropguardState(req.query.state);
+    if (cg && isAllowedCropguardRedirect(cg.redirectUri)) {
+        return res.redirect(`${cg.redirectUri.split("#")[0]}#error=${encodeURIComponent("Google sign-in was cancelled.")}`);
+    }
     const state = decodeOAuthState(req.query.state);
     if (req.query.error && state?.app === "cleanbridge" && isAllowedCleanbridgeRedirect(state.redirectUri)) {
         return res.redirect(appendQueryParam(state.redirectUri, "error", "Google sign-in was cancelled."));
@@ -82,6 +116,8 @@ router.get(
     cleanbridgeCancelled,
     passport.authenticate("google", { session: false }),
     async (req, res) => {
+        const cg = cropguardState(req.query.state);
+        if (cg) return cropguardGoogleCallback(req, res, cg);
         const cleanbridgeState = decodeOAuthState(req.query.state);
         if (cleanbridgeState?.app === "cleanbridge") {
             return cleanbridgeGoogleCallback(req, res, cleanbridgeState);
