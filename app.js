@@ -242,6 +242,12 @@ const io = require('socket.io')(server, {
 //     saveUninitialized: true,
 // }));
 // app.use(morgan('tiny'));
+// The old account pages are replaced by the developer portal, which also accepts
+// existing FullBackend accounts (controllers/platformDevelopers.js login).
+const PORTAL_REDIRECTS = { login: '#/signin', signup: '#/signup', dashboard: '#/apps' };
+app.get(['/login', '/login/login.html', '/signup', '/signup/signup.html', '/dashboard', '/dashboard/dashboard.html'], (req, res) => {
+    res.redirect(302, `/developers/${PORTAL_REDIRECTS[req.path.split('/')[1]]}`);
+});
 app.use(express.static('./public'))
 app.use(express.static('./static'))
 

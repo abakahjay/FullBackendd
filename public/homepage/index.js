@@ -9,25 +9,26 @@ navToggle.addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------
-// If a valid session exists (same localStorage/sessionStorage keys that
-// login.js/signup.js/dashboard.js use: userId + token-<userId>), swap the
-// Log in / Get started buttons for the same profile chip shown on the
-// dashboard instead - re-verified against the API on every load, not just
-// trusted from storage, so a stale/expired token falls back to logged-out.
+// Accounts live in the developer portal (/developers/). If its token
+// (localStorage "fb_dev_token") is still valid, swap Log in / Get started
+// for a chip that opens the dashboard - re-verified against the API on
+// every load, so an expired token falls back to logged-out.
 // ---------------------------------------------------------------------
 
-const isRealPhoto = (url) => /^https?:\/\//i.test(url || '');
+const TOKEN_KEY = 'fb_dev_token';
+const readToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } };
+const clearToken = () => { try { localStorage.removeItem(TOKEN_KEY); } catch { /* private mode */ } };
 
 function renderLoggedOut() {
     if (!logins) return;
     logins.innerHTML = '';
 
     const loginLink = document.createElement('a');
-    loginLink.href = '../login/login.html';
+    loginLink.href = '/developers/#/signin';
     loginLink.textContent = 'Log in';
 
     const signupLink = document.createElement('a');
-    signupLink.href = '../signup/signup.html';
+    signupLink.href = '/developers/#/signup';
     const signupBtn = document.createElement('button');
     signupBtn.className = 'start';
     signupBtn.textContent = 'Get started';
@@ -36,39 +37,23 @@ function renderLoggedOut() {
     logins.append(loginLink, signupLink);
 }
 
-function clearSession(userId) {
-    if (userId) {
-        localStorage.removeItem(`token-${userId}`);
-        sessionStorage.removeItem(`token-${userId}`);
-    }
-    localStorage.removeItem('userId');
-    sessionStorage.removeItem('userId');
-}
-
-function renderLoggedIn(user) {
+function renderLoggedIn(dev) {
     if (!logins) return;
     logins.innerHTML = '';
 
+    const label = dev.name || dev.email || 'Account';
     const profileLink = document.createElement('a');
-    profileLink.href = '../dashboard/dashboard.html';
+    profileLink.href = '/developers/#/apps';
     profileLink.className = 'nav-profile-link';
 
-    if (isRealPhoto(user.profile_picture)) {
-        const img = document.createElement('img');
-        img.src = user.profile_picture;
-        img.alt = '';
-        img.className = 'nav-avatar';
-        profileLink.appendChild(img);
-    } else {
-        const fallback = document.createElement('span');
-        fallback.className = 'nav-avatar nav-avatar-fallback';
-        fallback.textContent = (user.firstName || user.username || '?').charAt(0).toUpperCase();
-        profileLink.appendChild(fallback);
-    }
+    const fallback = document.createElement('span');
+    fallback.className = 'nav-avatar nav-avatar-fallback';
+    fallback.textContent = label.charAt(0).toUpperCase();
+    profileLink.appendChild(fallback);
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'nav-username';
-    nameSpan.textContent = user.firstName || user.username || 'Account';
+    nameSpan.textContent = label;
     profileLink.appendChild(nameSpan);
 
     const logoutBtn = document.createElement('button');
@@ -78,7 +63,7 @@ function renderLoggedIn(user) {
     logoutBtn.setAttribute('aria-label', 'Log out');
     logoutBtn.innerHTML = '<i class="fas fa-arrow-right-from-bracket"></i>';
     logoutBtn.addEventListener('click', () => {
-        clearSession(user._id);
+        clearToken();
         renderLoggedOut();
     });
 
@@ -91,25 +76,20 @@ function renderLoggedIn(user) {
 }
 
 async function checkAuth() {
-    const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
-    const token = userId
-        ? (localStorage.getItem(`token-${userId}`) || sessionStorage.getItem(`token-${userId}`))
-        : null;
-
+    const token = readToken();
     if (!token) {
         renderLoggedOut();
         return;
     }
 
     try {
-        const res = await fetch('/api/v1/auth/dashboard', {
+        const res = await fetch('/api/v1/platform/auth/me', {
             headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) throw new Error('Session is no longer valid');
-        const data = await res.json();
-        renderLoggedIn(data.user);
+        renderLoggedIn(await res.json());
     } catch {
-        clearSession(userId);
+        clearToken();
         renderLoggedOut();
     }
 }
