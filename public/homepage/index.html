@@ -5,9 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="styles.css">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../font-awesome/css/all.min.css" />
     <title>FullBackend — Multi-App Backend Platform</title>
 </head>
@@ -23,7 +20,9 @@
             </button>
         </div>
         <ul class="nav-links links">
+            <li><a href="#about">About</a></li>
             <li><a href="#features">Features</a></li>
+            <li><a href="/developers/">Developers</a></li>
             <li><a href="/api-docs">API Docs</a></li>
             <li><a href="https://portfolio-8jmo.onrender.com/" target="_blank" rel="noopener noreferrer">Portfolio</a></li>
         </ul>
@@ -40,10 +39,21 @@
             real-time messaging and multi-app Google login — so every new project starts with auth and a
             database already solved.</p>
         <div class="hero-cta">
-            <a href="../signup/signup.html"><button class="get">Create an account</button></a>
+            <a href="/developers/#/signup"><button class="get">Build your app on it</button></a>
             <a href="/api-docs" class="ghost-btn">View API docs <i class="fas fa-arrow-right"></i></a>
         </div>
     </div>
+
+    <section class="features" id="about">
+        <div class="features-head">
+            <span class="eyebrow"><i class="fas fa-info-circle"></i> About</span>
+            <h2>The backend behind GH-GPT, Nsoro, CleanBridge, SeedBridge and GhanaCropGuard</h2>
+            <p>FullBackend is one Express and MongoDB service that runs several production apps side by side, each
+                with its own users, data and security rules. Through the developer platform, any frontend can now
+                get its own isolated API on it: register your site (localhost works while you develop), describe the
+                data you need, and the routes are created for you.</p>
+        </div>
+    </section>
 
     <section class="features" id="features">
         <div class="features-head">
@@ -53,6 +63,12 @@
                 software that doesn't exist yet.</p>
         </div>
         <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon"><i class="fas fa-magic"></i></div>
+                <h3>APIs for your frontend</h3>
+                <p>Describe what your app needs in plain words and get secure routes, user accounts, password reset,
+                    file uploads and live docs. <a href="/developers/">Open the developer portal</a>.</p>
+            </div>
             <div class="feature-card">
                 <div class="feature-icon"><i class="fas fa-user-shield"></i></div>
                 <h3>Multi-app auth</h3>
