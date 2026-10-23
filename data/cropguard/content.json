@@ -1,0 +1,558 @@
+{
+  "_source": "Generated from the GhanaCropGuard AI Python backend (knowledge.py, labels.py, schemas.py, inference.py). This file is now the source of truth; follow docs/CONTENT_POLICY.md in the ghanacropguard-ai repo when editing guidance.",
+  "crops": [
+    "cashew",
+    "cassava",
+    "maize",
+    "tomato"
+  ],
+  "classes": [
+    {
+      "key": "cashew_anthracnose",
+      "crop": "cashew",
+      "source_folder": "anthracnose",
+      "display_name": "Anthracnose",
+      "kind": "disease"
+    },
+    {
+      "key": "cashew_gummosis",
+      "crop": "cashew",
+      "source_folder": "gumosis",
+      "display_name": "Gummosis",
+      "kind": "disease"
+    },
+    {
+      "key": "cashew_healthy",
+      "crop": "cashew",
+      "source_folder": "healthy",
+      "display_name": "Healthy",
+      "kind": "healthy"
+    },
+    {
+      "key": "cashew_leaf_miner",
+      "crop": "cashew",
+      "source_folder": "leaf miner",
+      "display_name": "Leaf miner",
+      "kind": "pest"
+    },
+    {
+      "key": "cashew_red_rust",
+      "crop": "cashew",
+      "source_folder": "red rust",
+      "display_name": "Red rust",
+      "kind": "disease"
+    },
+    {
+      "key": "cassava_bacterial_blight",
+      "crop": "cassava",
+      "source_folder": "bacterial blight",
+      "display_name": "Bacterial blight",
+      "kind": "disease"
+    },
+    {
+      "key": "cassava_brown_spot",
+      "crop": "cassava",
+      "source_folder": "brown spot",
+      "display_name": "Brown spot",
+      "kind": "disease"
+    },
+    {
+      "key": "cassava_green_mite",
+      "crop": "cassava",
+      "source_folder": "green mite",
+      "display_name": "Green mite",
+      "kind": "pest"
+    },
+    {
+      "key": "cassava_healthy",
+      "crop": "cassava",
+      "source_folder": "healthy",
+      "display_name": "Healthy",
+      "kind": "healthy"
+    },
+    {
+      "key": "cassava_mosaic",
+      "crop": "cassava",
+      "source_folder": "mosaic",
+      "display_name": "Mosaic",
+      "kind": "disease"
+    },
+    {
+      "key": "maize_fall_armyworm",
+      "crop": "maize",
+      "source_folder": "fall armyworm",
+      "display_name": "Fall armyworm",
+      "kind": "pest"
+    },
+    {
+      "key": "maize_grasshopper",
+      "crop": "maize",
+      "source_folder": "grasshoper",
+      "display_name": "Grasshopper",
+      "kind": "pest"
+    },
+    {
+      "key": "maize_healthy",
+      "crop": "maize",
+      "source_folder": "healthy",
+      "display_name": "Healthy",
+      "kind": "healthy"
+    },
+    {
+      "key": "maize_leaf_beetle",
+      "crop": "maize",
+      "source_folder": "leaf beetle",
+      "display_name": "Leaf beetle",
+      "kind": "pest"
+    },
+    {
+      "key": "maize_leaf_blight",
+      "crop": "maize",
+      "source_folder": "leaf blight",
+      "display_name": "Leaf blight",
+      "kind": "disease"
+    },
+    {
+      "key": "maize_leaf_spot",
+      "crop": "maize",
+      "source_folder": "leaf spot",
+      "display_name": "Leaf spot",
+      "kind": "disease"
+    },
+    {
+      "key": "maize_streak_virus",
+      "crop": "maize",
+      "source_folder": "streak virus",
+      "display_name": "Streak virus",
+      "kind": "disease"
+    },
+    {
+      "key": "tomato_healthy",
+      "crop": "tomato",
+      "source_folder": "healthy",
+      "display_name": "Healthy",
+      "kind": "healthy"
+    },
+    {
+      "key": "tomato_leaf_blight",
+      "crop": "tomato",
+      "source_folder": "leaf blight",
+      "display_name": "Leaf blight",
+      "kind": "disease"
+    },
+    {
+      "key": "tomato_leaf_curl",
+      "crop": "tomato",
+      "source_folder": "leaf curl",
+      "display_name": "Leaf curl",
+      "kind": "disease"
+    },
+    {
+      "key": "tomato_septoria_leaf_spot",
+      "crop": "tomato",
+      "source_folder": "septoria leaf spot",
+      "display_name": "Septoria leaf spot",
+      "kind": "disease"
+    },
+    {
+      "key": "tomato_verticillium_wilt",
+      "crop": "tomato",
+      "source_folder": "verticulium wilt",
+      "display_name": "Verticillium wilt",
+      "kind": "disease"
+    }
+  ],
+  "regions": [
+    "Ahafo",
+    "Ashanti",
+    "Bono",
+    "Bono East",
+    "Central",
+    "Eastern",
+    "Greater Accra",
+    "North East",
+    "Northern",
+    "Oti",
+    "Savannah",
+    "Upper East",
+    "Upper West",
+    "Volta",
+    "Western",
+    "Western North"
+  ],
+  "disclaimer": "This is an AI-assisted preliminary assessment, not a diagnosis. It can be wrong. Confirm with an agricultural extension officer before acting.",
+  "warningText": {
+    "low_confidence": "The model is not confident about this photo. Treat the result as a weak hint and consult an extension officer.",
+    "close_alternatives": "Two or more conditions scored similarly. Check the alternatives listed.",
+    "crop_uncertain": "The model is unsure which crop this is. Make sure the photo shows cashew, cassava, maize or tomato.",
+    "low_resolution": "The photo is small. A closer, sharper photo of the affected part may give a better result.",
+    "scope": "This tool only recognises 22 conditions of cashew, cassava, maize and tomato. Other crops or problems will still be matched to one of these, so results for anything else are not meaningful."
+  },
+  "sources": {
+    "cabi": {
+      "title": "CABI PlantwisePlus Knowledge Bank",
+      "url": "https://plantwiseplusknowledgebank.org/"
+    },
+    "iita": {
+      "title": "International Institute of Tropical Agriculture (IITA)",
+      "url": "https://www.iita.org/"
+    },
+    "fao_faw": {
+      "title": "FAO Fall Armyworm resources",
+      "url": "https://www.fao.org/fall-armyworm/en/"
+    },
+    "mofa": {
+      "title": "Ministry of Food and Agriculture, Ghana",
+      "url": "https://mofa.gov.gh/"
+    },
+    "plantvillage": {
+      "title": "PlantVillage (Penn State University)",
+      "url": "https://plantvillage.psu.edu/"
+    }
+  },
+  "alwaysSteps": [
+    "Check several plants across the field, not just one leaf, before deciding anything.",
+    "If you are unsure, or the problem is spreading, show the plant to your district MoFA agricultural extension officer."
+  ],
+  "escalate": "Contact your district agricultural extension officer (Ministry of Food and Agriculture) for confirmation and for advice on any approved crop-protection products.",
+  "guidance": {
+    "en": {
+      "cashew_anthracnose": {
+        "summary": "Anthracnose is a fungal disease of cashew (commonly Colletotrichum species). It is favoured by warm, humid or rainy weather and attacks young leaves, flowers and nuts.",
+        "signs": [
+          "Reddish-brown to dark, sunken patches on young leaves, shoots, flowers or nuts",
+          "Affected flowers and young nuts may dry and fall"
+        ],
+        "steps": [
+          "Prune and remove badly affected shoots and fallen infected material from the farm",
+          "Open up the canopy by pruning so air can move and leaves dry faster",
+          "Keep the area under the trees clean"
+        ],
+        "sources": [
+          "cabi",
+          "mofa"
+        ]
+      },
+      "cashew_gummosis": {
+        "summary": "Gummosis is a disease in which the cashew tree oozes gum from the bark of the trunk or branches. It is commonly associated with fungal infection (e.g. Lasiodiplodia theobromae), often entering through wounds.",
+        "signs": [
+          "Gum oozing from cracks on the trunk or branches",
+          "Darkened, cracked bark (cankers)",
+          "Branch dieback in severe cases"
+        ],
+        "steps": [
+          "Avoid wounding trunks with tools or fire",
+          "Remove and safely dispose of dead branches",
+          "Ask an extension officer to inspect trees with large cankers"
+        ],
+        "sources": [
+          "cabi",
+          "mofa"
+        ]
+      },
+      "cashew_healthy": {
+        "summary": "No signs of the cashew conditions this model was trained on were detected in this photo.",
+        "signs": [],
+        "steps": [
+          "Keep monitoring, especially during new leaf flushes and flowering",
+          "Maintain good field hygiene and pruning"
+        ],
+        "sources": [
+          "mofa"
+        ]
+      },
+      "cashew_leaf_miner": {
+        "summary": "The cashew leaf miner is a small moth whose larvae feed inside young, tender leaves, leaving blister-like mines.",
+        "signs": [
+          "Silvery or pale blisters/patches on young leaves",
+          "Young leaves may curl, dry or tear"
+        ],
+        "steps": [
+          "Watch new leaf flushes closely, when attack is most likely",
+          "Remove and destroy heavily mined shoots on small trees",
+          "Encourage natural enemies by avoiding unnecessary broad spraying"
+        ],
+        "sources": [
+          "cabi"
+        ]
+      },
+      "cashew_red_rust": {
+        "summary": "Red rust on cashew is caused by a parasitic alga (Cephaleuros species) that forms rust-coloured patches, mainly in humid conditions.",
+        "signs": [
+          "Small, round, orange to rusty-red velvety spots on leaves",
+          "Spots can merge in shaded, humid canopies"
+        ],
+        "steps": [
+          "Prune to reduce shade and humidity in the canopy",
+          "Remove heavily affected leaves and branches"
+        ],
+        "sources": [
+          "cabi"
+        ]
+      },
+      "cassava_bacterial_blight": {
+        "summary": "Cassava bacterial blight is caused by a bacterium (Xanthomonas) that spreads mainly through infected stem cuttings, rain splash and tools.",
+        "signs": [
+          "Angular, water-soaked spots on leaves that turn brown",
+          "Leaf wilting and blight",
+          "Gum on stems and shoot dieback in severe cases"
+        ],
+        "steps": [
+          "Plant only cuttings taken from healthy-looking plants",
+          "Uproot and destroy badly infected plants",
+          "Clean cutting tools between fields",
+          "Rotate with a different crop"
+        ],
+        "sources": [
+          "iita",
+          "cabi"
+        ]
+      },
+      "cassava_brown_spot": {
+        "summary": "Brown leaf spot is a fungal disease of cassava leaves. It usually affects older leaves and is often of moderate importance.",
+        "signs": [
+          "Small brown spots with a darker border on older leaves",
+          "Older leaves may yellow and drop"
+        ],
+        "steps": [
+          "Remove fallen infected leaves",
+          "Use tolerant varieties recommended in your area",
+          "Keep plant spacing that allows air movement"
+        ],
+        "sources": [
+          "iita",
+          "cabi"
+        ]
+      },
+      "cassava_green_mite": {
+        "summary": "Cassava green mite is a tiny pest that sucks sap from young leaves. Damage is usually worse in the dry season.",
+        "signs": [
+          "Yellowish speckling on young leaves",
+          "Small, deformed leaves and stunted shoot tips"
+        ],
+        "steps": [
+          "Plant early in the rainy season so plants are strong before the dry season",
+          "Use tolerant varieties",
+          "Natural enemies such as predatory mites help keep numbers down, so avoid unnecessary spraying"
+        ],
+        "sources": [
+          "iita"
+        ]
+      },
+      "cassava_healthy": {
+        "summary": "No signs of the cassava conditions this model was trained on were detected in this photo.",
+        "signs": [],
+        "steps": [
+          "Keep monitoring young leaves",
+          "Continue using clean planting material"
+        ],
+        "sources": [
+          "iita"
+        ]
+      },
+      "cassava_mosaic": {
+        "summary": "Cassava mosaic disease is caused by viruses spread by whiteflies and by planting cuttings from infected plants. It is one of the most damaging cassava diseases in Africa.",
+        "signs": [
+          "Yellow and green mosaic pattern on leaves",
+          "Twisted, distorted or reduced leaves",
+          "Stunted plants"
+        ],
+        "steps": [
+          "Plant cuttings only from healthy plants or certified clean sources",
+          "Uproot infected plants early, before they spread the virus",
+          "Use resistant varieties recommended by MoFA or research institutes"
+        ],
+        "sources": [
+          "iita",
+          "cabi"
+        ]
+      },
+      "maize_fall_armyworm": {
+        "summary": "Fall armyworm is a caterpillar pest that feeds inside the maize whorl and on leaves. Early detection makes a big difference.",
+        "signs": [
+          "Ragged holes and 'window panes' in leaves",
+          "Sawdust-like droppings (frass) in the whorl",
+          "Caterpillars in the funnel of young plants"
+        ],
+        "steps": [
+          "Scout the field at least weekly, especially in the first weeks after planting",
+          "Crush egg masses and young caterpillars by hand on small farms",
+          "Report outbreaks to your extension officer, who can advise on approved control options"
+        ],
+        "sources": [
+          "fao_faw",
+          "mofa"
+        ]
+      },
+      "maize_grasshopper": {
+        "summary": "Grasshoppers chew maize leaves. Occasional damage is common; large numbers can strip plants.",
+        "signs": [
+          "Irregular chewed edges on leaves",
+          "Grasshoppers visible on or near plants"
+        ],
+        "steps": [
+          "Keep field borders free of tall weeds where grasshoppers shelter",
+          "Monitor numbers; report unusually large swarms to MoFA"
+        ],
+        "sources": [
+          "cabi",
+          "mofa"
+        ]
+      },
+      "maize_healthy": {
+        "summary": "No signs of the maize conditions this model was trained on were detected in this photo.",
+        "signs": [],
+        "steps": [
+          "Keep scouting weekly, especially for fall armyworm in young maize"
+        ],
+        "sources": [
+          "fao_faw"
+        ]
+      },
+      "maize_leaf_beetle": {
+        "summary": "Leaf beetles feed on maize leaves by scraping or chewing, leaving small holes or stripes.",
+        "signs": [
+          "Small holes, scraped stripes or 'skeletonised' patches on leaves",
+          "Beetles on leaves"
+        ],
+        "steps": [
+          "Monitor how many plants are affected",
+          "Control weeds around the field",
+          "Ask an extension officer if damage is widespread on young plants"
+        ],
+        "sources": [
+          "cabi"
+        ]
+      },
+      "maize_leaf_blight": {
+        "summary": "Leaf blight of maize is a fungal leaf disease (for example northern leaf blight). It spreads in cool, humid weather and survives on crop residue.",
+        "signs": [
+          "Long, grey-green to tan, cigar-shaped lesions on leaves",
+          "Lesions can join and kill leaves"
+        ],
+        "steps": [
+          "Rotate maize with a non-cereal crop",
+          "Manage or bury infected crop residue after harvest",
+          "Use tolerant varieties recommended in your area"
+        ],
+        "sources": [
+          "cabi",
+          "plantvillage"
+        ]
+      },
+      "maize_leaf_spot": {
+        "summary": "Leaf spot of maize covers several fungal diseases that form spots on leaves (for example grey leaf spot or Curvularia leaf spot).",
+        "signs": [
+          "Small round or rectangular spots on leaves, often with a lighter centre or a halo"
+        ],
+        "steps": [
+          "Rotate crops and manage residue",
+          "Avoid very dense planting",
+          "Use tolerant varieties"
+        ],
+        "sources": [
+          "cabi",
+          "plantvillage"
+        ]
+      },
+      "maize_streak_virus": {
+        "summary": "Maize streak disease is caused by a virus spread by small leafhoppers. Young plants that are infected early suffer the most.",
+        "signs": [
+          "Narrow, broken yellow streaks running along the leaf veins",
+          "Stunted young plants"
+        ],
+        "steps": [
+          "Use streak-resistant maize varieties",
+          "Avoid planting new maize next to older, infected maize",
+          "Pull out infected young plants early"
+        ],
+        "sources": [
+          "iita",
+          "cabi"
+        ]
+      },
+      "tomato_healthy": {
+        "summary": "No signs of the tomato conditions this model was trained on were detected in this photo.",
+        "signs": [],
+        "steps": [
+          "Keep checking lower leaves and new growth regularly"
+        ],
+        "sources": [
+          "plantvillage"
+        ]
+      },
+      "tomato_leaf_blight": {
+        "summary": "Leaf blight of tomato is caused by fungal or fungus-like pathogens (for example early blight). It spreads in warm, wet conditions and starts on lower leaves.",
+        "signs": [
+          "Brown spots, sometimes with rings like a target, on older leaves",
+          "Yellowing around spots and leaf drop from the bottom up"
+        ],
+        "steps": [
+          "Remove infected lower leaves and destroy them away from the field",
+          "Water at the base of plants, not over the leaves",
+          "Stake plants and rotate crops"
+        ],
+        "sources": [
+          "plantvillage",
+          "cabi"
+        ]
+      },
+      "tomato_leaf_curl": {
+        "summary": "Tomato leaf curl is usually caused by viruses spread by whiteflies. Infected plants cannot be cured, so prevention is key.",
+        "signs": [
+          "Leaves curl upward and become small, thick and yellowish",
+          "Stunted plants with few fruits"
+        ],
+        "steps": [
+          "Remove and destroy infected plants early",
+          "Raise seedlings under insect-proof netting",
+          "Use tolerant varieties and control weeds that host whiteflies"
+        ],
+        "sources": [
+          "plantvillage",
+          "cabi"
+        ]
+      },
+      "tomato_septoria_leaf_spot": {
+        "summary": "Septoria leaf spot is a fungal disease of tomato leaves that spreads by rain splash.",
+        "signs": [
+          "Many small round spots with dark edges and grey centres on lower leaves",
+          "Tiny black dots inside the spots"
+        ],
+        "steps": [
+          "Remove infected lower leaves",
+          "Avoid overhead watering and working among wet plants",
+          "Rotate crops and clear plant debris after harvest"
+        ],
+        "sources": [
+          "plantvillage",
+          "cabi"
+        ]
+      },
+      "tomato_verticillium_wilt": {
+        "summary": "Verticillium wilt is a soil-borne fungal disease that blocks the water vessels of the plant.",
+        "signs": [
+          "Yellowing, often V-shaped, on lower leaves",
+          "Wilting during the hottest part of the day",
+          "Brown discolouration inside the lower stem when cut"
+        ],
+        "steps": [
+          "Rotate with non-host crops such as cereals",
+          "Remove and destroy wilted plants",
+          "Use varieties listed as resistant to Verticillium"
+        ],
+        "sources": [
+          "plantvillage",
+          "cabi"
+        ]
+      }
+    }
+  },
+  "supportedLanguages": [
+    "en"
+  ],
+  "policy": {
+    "minAge": 16,
+    "termsVersion": "2026-10-22"
+  }
+}
