@@ -2,7 +2,7 @@
 // throwaway-database rules). Run: CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/cropguard_test npm run test:platform
 const { test, describe, before, after } = require("node:test");
 const assert = require("node:assert/strict");
-const { mongoProblem, solid, startServer } = require("../cropguard/helpers.js");
+const { MONGO, mongoProblem, solid, startServer } = require("../cropguard/helpers.js");
 
 const skip = mongoProblem() || false;
 let n = 0;
@@ -229,6 +229,34 @@ describe("developer platform", { skip }, () => {
         const again = await call("POST", `${P}/apps/${app.id}/suggest`, { token: t, json: { description: "more tasks for people" } });
         assert.ok(again.data.recommendations.some((r) => r.kind === "existing" && r.collection === "tasks"));
         assert.notEqual(again.data.collection.name, "tasks");
+    });
+
+    test("existing FullBackend accounts sign in to the portal; old account pages redirect to it", async () => {
+        const mongoose = require("mongoose");
+        const User = require("../../models/User.js");
+        await mongoose.connect(MONGO);
+        const id = uniq();
+        try {
+            await User.create({ firstName: "Old", lastName: "Account", username: `old${id}`, email: `old${id}@example.com`, password: "oldpass1", isVerified: true });
+            await User.create({ firstName: "New", lastName: "Account", username: `unv${id}`, email: `unv${id}@example.com`, password: "oldpass2", isVerified: false });
+        } finally {
+            await mongoose.disconnect();
+        }
+        const wrong = await call("POST", `${P}/auth/login`, { json: { email: `old${id}@example.com`, password: "nope-nope" } });
+        assert.equal(wrong.status, 401);
+        const ok = await call("POST", `${P}/auth/login`, { json: { email: `OLD${id}@example.com`, password: "oldpass1" } });
+        assert.equal(ok.status, 200, JSON.stringify(ok.data));
+        assert.equal(ok.data.developer.email, `old${id}@example.com`);
+        assert.equal((await call("POST", `${P}/auth/login`, { json: { email: `old${id}@example.com`, password: "oldpass1" } })).status, 200);
+        const unverified = await call("POST", `${P}/auth/login`, { json: { email: `unv${id}@example.com`, password: "oldpass2" } });
+        assert.equal(unverified.status, 403);
+        assert.equal(unverified.data.detail.code, "email_not_verified");
+
+        for (const [path, hash] of [["/login/login.html", "#/signin"], ["/signup/signup.html", "#/signup"], ["/dashboard/dashboard.html?oven=x", "#/apps"]]) {
+            const r = await call("GET", path);
+            assert.equal(r.status, 302, path);
+            assert.equal(r.headers.get("location"), `/developers/${hash}`);
+        }
     });
 
     test("existing apps are unaffected", async () => {

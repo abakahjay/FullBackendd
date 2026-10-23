@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const validator = require("validator");
 const PlatformDeveloper = require("../models/PlatformDeveloper.js");
+const User = require("../models/User.js");
 const { createDeveloperToken } = require("../middleware/platformAuth.js");
 const { deleteAppData } = require("./platformApps.js");
 const PlatformApp = require("../models/PlatformApp.js");
@@ -12,6 +13,7 @@ const ROUNDS = 12;
 const RESET_TTL_MS = 30 * 60 * 1000;
 const dummyHash = bcrypt.hash("timing-equaliser", ROUNDS);
 // Reset links open the dashboard on this server; never built from the request's Host header.
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const dashboardUrl = () => `${(process.env.ORIGIN || "http://localhost:7004").replace(/\/$/, "")}/developers/`;
 
 const tokenResponse = (d) => ({
@@ -55,8 +57,23 @@ const login = async (req, res) => {
     if (!isStr(b.password) || b.password.length > 200) c.add("password", "Password is required");
     c.done();
     const email = b.email.trim().toLowerCase();
-    const dev = await PlatformDeveloper.findOne({ email });
-    const ok = await bcrypt.compare(b.password, dev ? dev.passwordHash : await dummyHash);
+    let dev = await PlatformDeveloper.findOne({ email });
+    let ok = await bcrypt.compare(b.password, dev ? dev.passwordHash : await dummyHash);
+    if (!dev) {
+        // Existing FullBackend accounts (the old /login page, Nsoro, GH-GPT...) sign in with
+        // the same email and password; their developer account is created on first sign-in.
+        const legacy = await User.findOne({ email: new RegExp(`^${escapeRegex(email)}$`, "i") }).select("email password firstName isVerified");
+        if (legacy && typeof legacy.password === "string" && (await bcrypt.compare(b.password, legacy.password))) {
+            if (!legacy.isVerified) throw fail(403, "email_not_verified", "This FullBackend account's email isn't verified, so it can't sign in here yet. Create a developer account with the same email instead.");
+            try {
+                dev = await PlatformDeveloper.create({ email, passwordHash: legacy.password, name: legacy.firstName || null, termsAcceptedAt: new Date() });
+            } catch (err) {
+                if (err.code !== 11000) throw err;
+                dev = await PlatformDeveloper.findOne({ email });
+            }
+            ok = Boolean(dev) && (await bcrypt.compare(b.password, dev.passwordHash));
+        }
+    }
     if (!dev || !ok || !dev.isActive) {
         rateLimit(`dev-login-fail:${email}`, 10, 15 * 60);
         throw fail(401, "invalid_credentials", "Email or password is incorrect.");
@@ -121,7 +138,17 @@ const forgotPassword = async (req, res) => {
     c.done();
     const email = b.email.trim().toLowerCase();
     rateLimit(`dev-forgot-email:${email}`, 3, 15 * 60);
-    const dev = await PlatformDeveloper.findOne({ email });
+    let dev = await PlatformDeveloper.findOne({ email });
+    if (!dev) {
+        // A verified FullBackend account that never opened the portal: give it a developer
+        // account with an unusable password, which the emailed link replaces.
+        const legacy = await User.findOne({ email: new RegExp(`^${escapeRegex(email)}$`, "i"), isVerified: true }).select("firstName");
+        if (legacy) {
+            dev = await PlatformDeveloper.create({
+                email, passwordHash: await bcrypt.hash(crypto.randomBytes(32).toString("hex"), ROUNDS), name: legacy.firstName || null, termsAcceptedAt: new Date(),
+            }).catch(() => PlatformDeveloper.findOne({ email }));
+        }
+    }
     if (dev && dev.isActive) {
         const token = crypto.randomBytes(32).toString("hex");
         dev.resetTokenHash = sha256(token);
