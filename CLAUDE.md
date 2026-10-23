@@ -450,6 +450,26 @@ It matched Python bit for bit on CCMT photos and edge cases (odd sizes, RGBA, gr
 - It also checks that CleanBridge still answers with `{ msg }` and that `/api-docs.json` still lists every app.
 - Admin CLI: `node scripts/cropguardCreateAdmin.js <email>` (prompts for the password).
 
+## Developer platform (`/developers`, `/api/v1/platform/*`, `/api/v1/apps/<slug>/*`)
+
+Lets outside developers register an app (frontend URLs, data collections) and get a generated REST API, with no code of theirs ever running here.
+
+**Pieces.**
+- Dashboard: `public/developers/` (vanilla JS, strict CSP set in app.js, everything rendered with `textContent`). Hash routes: `#/apps/<id>/overview|frontends|apis|usage|settings`, `#/profile`.
+- `routes/platform.js` exports two routers, mounted in app.js **before** the global parsers/sanitizers (like CropGuard), each with its own JSON parser, helmet and `{ detail: { code, message, fields? } }` error handler.
+- Models: `PlatformDeveloper`, `PlatformApp` (spec + keys), `PlatformAppUser` (scoped by `appId`; same email can exist in two apps), `PlatformRecord` (`appId`, `collectionName`, `ownerId`, `data`). Files: GridFS bucket `platformFiles` (`utils/platformStorage.js`).
+- `utils/platform.js` holds the spec validator (`validateAppSpec`), the record validator (`validateRecord`) and the limits.
+
+**Security model.**
+- The app spec is data. Collection and field names are regex-checked and reserved names refused. Types come from a fixed list. Access rules: read `public|signed_in|owner|admin`, create `public|signed_in|admin`, update/delete `owner|admin`.
+- Records: unknown keys are rejected and every value is coerced to its declared type, so nothing reaches Mongo as an operator. Filters are equality on schema fields only, cast by type; sorting is by schema fields or `created_at`; at most 16 KB per record.
+- Callers: browsers and phones send `X-App-Key` (the publishable key). A request with an `Origin` must come from `frontendOrigins` (or any localhost port while `allowLocalhost`). `Bearer sk_…` (the secret key, stored as SHA-256 and shown once) is admin of that app only, and is refused if an `Origin` header is present (browser leak). End users get JWTs `{ sub, aid, app: "platform-app", tv, av }`; developers get `{ sub, app: "platform", tv }`. Neither has `userId`, so the shared middleware rejects both.
+- Files: the type is sniffed from the bytes; images are re-encoded (EXIF/GPS dropped); each file has a random 128-bit id; they are served with `CSP: sandbox` and `nosniff`; PDFs are sent as attachments.
+- Limits (`PLATFORM_*` env vars): apps per developer, records, users and MB per app, requests per minute per app, writes and auth attempts per IP. Reset links use `ORIGIN`, never the request's Host header.
+- "Describe what you want" (`utils/platformSuggest.js`): recommends built-ins (accounts, uploads, reset), says what isn't supported (payments, SMS, websockets), detects existing collections, then drafts a collection from the AI (`utils/ghgptAi.js`) or vetted templates. The draft goes through `validateAppSpec`, so a prompt-injected answer can't weaken anything, and nothing is saved until the developer clicks Create. `PLATFORM_AI_SUGGESTIONS=false` disables the AI.
+
+Tests: `CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/cropguard_test npm run test:platform` (same throwaway-database rule as CropGuard).
+
 ## Skills to use
 
 Load these skills (they are installed for this user) before working in this repo:
