@@ -28,7 +28,9 @@ const signUp = async (req, res) => {
         throw new BadRequestError("Please provide name, phone, password and role");
     }
 
-    const user = await SeedBridgeUser.create({ name, phone, password, role, email, region });
+    // Email is what password reset uses; "" would clash on the unique index, so store none instead.
+    const cleanEmail = typeof email === "string" && email.trim() ? email.trim().toLowerCase() : undefined;
+    const user = await SeedBridgeUser.create({ name, phone, password, role, email: cleanEmail, region });
     const token = user.createJWT();
 
     res.status(StatusCodes.CREATED).json({
