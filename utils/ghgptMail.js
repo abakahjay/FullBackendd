@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const { deliver, emailProvider } = require("./mailTransport");
 const { pushToUser } = require("./push");
+const { postalAddress } = require("./mailPostal");
 
 // Email for GH-GPT (GHGPT-main/Chatbot): welcome, new sign-in alerts and
 // "email me this chat". Same deliverability rules as utils/nsoroMail.js:
@@ -44,6 +45,7 @@ const render = ({ name, title, message, blocks, cta, unsubscribeUrl }) => {
         "— GH-GPT",
         "",
         `You're receiving this because you have a GH-GPT account (${siteUrl()}). Stop these emails: ${unsubscribeUrl}`,
+        ...(postalAddress() ? [postalAddress()] : []),
     ].join("\n");
 
     const paragraphs = String(message || "")
@@ -78,7 +80,7 @@ const render = ({ name, title, message, blocks, cta, unsubscribeUrl }) => {
         ${cta ? `<tr><td style="padding:12px 26px 22px;"><a href="${escapeHtml(cta.url)}" style="display:inline-block;background:#3182ce;color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:bold;">${escapeHtml(cta.label)}</a></td></tr>` : ""}
         <tr><td style="padding:14px 26px 22px;border-top:1px solid #edf2f7;font-size:12px;line-height:1.5;color:#718096;">
           You're receiving this because you have a GH-GPT account.
-          <a href="${escapeHtml(unsubscribeUrl)}" style="color:#718096;">Stop these emails</a>.
+          <a href="${escapeHtml(unsubscribeUrl)}" style="color:#718096;">Stop these emails</a>.${postalAddress() ? `<br>${escapeHtml(postalAddress())}` : ""}
         </td></tr>
       </table>
     </td></tr>

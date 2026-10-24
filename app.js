@@ -390,8 +390,8 @@ app.use((req, res, next) => {
         "Content-Security-Policy",
         "default-src 'self'; " +
         "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; " +
-        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; " +
-        "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; " +
+        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; " +
+        "font-src 'self' https://cdnjs.cloudflare.com; " +
         "img-src 'self' data: blob: https://www.gravatar.com https://s3.amazonaws.com https://*.googleusercontent.com https://ik.imagekit.io;"
     );
     next();

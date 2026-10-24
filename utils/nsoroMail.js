@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const { deliver, emailProvider } = require("./mailTransport");
 const { pushToUser } = require("./push");
+const { postalAddress } = require("./mailPostal");
 
 // Email for Nsoro: activity emails
 // (new follower, comment, message while you're away) and admin "app update" emails.
@@ -49,6 +50,7 @@ const render = ({ name, title, message, cta, unsubscribeUrl }) => {
         "--",
         `You got this email because you have a Nsoro account (${siteUrl().replace(/^https:\/\//, "")}) with email notifications on.`,
         `To stop these emails: ${unsubscribeUrl}`,
+        ...(postalAddress() ? [postalAddress()] : []),
     ].join("\n");
 
     const paragraphs = String(message)
@@ -69,7 +71,7 @@ ${link}
 <p style="margin:0 0 24px;">Thanks,<br>The Nsoro team</p>
 <p style="margin:0;padding-top:12px;border-top:1px solid #e5e5e5;font-size:12px;line-height:1.5;color:#777777;">
 You got this email because you have a Nsoro account with email notifications on.
-<a href="${escapeHtml(unsubscribeUrl)}" style="color:#777777;">Unsubscribe</a>
+<a href="${escapeHtml(unsubscribeUrl)}" style="color:#777777;">Unsubscribe</a>${postalAddress() ? `<br>${escapeHtml(postalAddress())}` : ""}
 </p>
 </div>
 </body></html>`;

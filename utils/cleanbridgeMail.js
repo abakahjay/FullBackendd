@@ -1,5 +1,6 @@
 const { deliver, emailProvider } = require("./mailTransport");
 const jwt = require("jsonwebtoken");
+const { postalAddress } = require("./mailPostal");
 
 // Transactional email for CleanBridge GH (pickup updates, payments, payouts).
 //
@@ -54,6 +55,7 @@ const render = ({ name, title, message, cta, unsubscribeUrl }) => {
         "— CleanBridge GH",
         "",
         `You're receiving this because you have a CleanBridge GH account. Stop these emails: ${unsubscribeUrl}`,
+        ...(postalAddress() ? [postalAddress()] : []),
     ].join("\n");
 
     const html = `<!doctype html>
@@ -69,7 +71,7 @@ const render = ({ name, title, message, cta, unsubscribeUrl }) => {
         ${cta ? `<tr><td style="padding:6px 26px 20px;"><a href="${escapeHtml(cta.url)}" style="display:inline-block;background:#21927b;color:#ffffff;text-decoration:none;padding:11px 18px;border-radius:9px;font-size:14px;font-weight:bold;">${escapeHtml(cta.label)}</a></td></tr>` : ""}
         <tr><td style="padding:14px 26px 22px;border-top:1px solid #eee6d6;font-size:12px;line-height:1.5;color:#6b7c7e;">
           You're receiving this because you have a CleanBridge GH account.
-          <a href="${escapeHtml(unsubscribeUrl)}" style="color:#6b7c7e;">Stop these emails</a>.
+          <a href="${escapeHtml(unsubscribeUrl)}" style="color:#6b7c7e;">Stop these emails</a>.${postalAddress() ? `<br>${escapeHtml(postalAddress())}` : ""}
         </td></tr>
       </table>
     </td></tr>
