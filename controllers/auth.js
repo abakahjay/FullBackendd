@@ -41,7 +41,8 @@ const signUp = async (req, res) => {
     //Destructure the req.body
     const { firstName, lastName, username, email, password } = req.body;
     const phone = req.body.phone
-    const role = req.body.role
+    // Never let a sign-up choose "admin": adminOnly routes trust this field.
+    const role = ['worker', 'caterer'].includes(req.body.role) ? req.body.role : 'user';
     // Never log req.body here: it contains the plaintext password.
 
 
