@@ -487,6 +487,15 @@ const start = async () => {
             // Host only: the full URI contains the database password.
             console.log('\x1b[36m%s\x1b[0m', '🔌 Connected to:', String(process.env.MONGO_URI).replace(/\/\/[^@/]*@/, '//***@').split('?')[0]);
         })
+        // Security audit: until 2026-10-24 /auth/signup accepted role "admin" from anyone, so list
+        // every admin at startup (username, masked email, creation date) for the owner to review.
+        try {
+            const admins = await require('./models/User.js').find({ role: 'admin' }, { username: 1, email: 1, createdAt: 1, created: 1 }).lean();
+            const mask = (e) => String(e || '').replace(/^(.).*?(@.*)$/, '$1***$2');
+            console.log(`[security] admin accounts: ${admins.length}` + admins.map((a) => `\n  - ${a.username} ${mask(a.email)} created ${new Date(a.createdAt || a.created || 0).toISOString().slice(0, 10)}`).join(''));
+        } catch (err) {
+            console.log(`[security] admin audit failed: ${err.message}`);
+        }
 
         server.listen(port, console.log('\x1b[42m%s\x1b[0m', `🚀 Server Running on === http://localhost:${port}`));
         // https.createServer(sslOptions, app).listen(port, () => {
