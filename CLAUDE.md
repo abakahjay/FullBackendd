@@ -481,3 +481,11 @@ Load these skills (they are installed for this user) before working in this repo
 - `/emil-design-eng` – interaction details, motion and component craft
 
 The FullBackendd API is shared by many live apps (Nsoro, GH-GPT, CleanBridge, SeedBridge, GhanaCropGuard web and mobile, the portfolio and the static MTN/AFA pages). Before changing any route, middleware, error shape, CORS, auth or rate limit, grep those apps' folders in `Desktop/VS Projects` for what they use, and keep each of them working.
+
+## Legal and security rules (all apps)
+
+- Never take `role` (or any privilege) from a sign-up body. `/api/v1/auth/signup` only allows `worker`/`caterer`, else `user`; `adminOnly` trusts `User.role`.
+- Nsoro reports: `models/NsoroReport.js`, `POST /nsoro/posts/:id/report`, admin-only `GET /nsoro/reports` and `PATCH /nsoro/reports/:id`; admins may `DELETE /nsoro/posts/:id` for anyone (closes the post's open reports).
+- Email: production needs `MAIL_RELAY_URL` + `MAIL_RELAY_SECRET` (`scripts/gmailRelay.gs`) because Render blocks SMTP; without them every password-reset email fails. Marketing mailers (Nsoro, GH-GPT, CleanBridge) print `MAIL_POSTAL_ADDRESS` in the footer (CAN-SPAM) and keep one-click unsubscribe.
+- The CSP no longer allows Google Fonts; frontends bundle their fonts.
+- SeedBridge sign-up stores the email trimmed and lowercased (password reset finds users by email).
