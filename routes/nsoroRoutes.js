@@ -17,6 +17,9 @@ router.post('/updates', authMiddleware, adminOnly, sendUpdate);
 // Logged-in social actions (the user comes from the token, never the request body).
 // Uploads (POST /posts, PATCH /me/photo) live in routes/nsoroUploadRoutes.js.
 router.delete('/posts/:postId', authMiddleware, social.deletePost);
+router.post('/posts/:postId/report', limiter, authMiddleware, social.reportPost);
+router.get('/reports', authMiddleware, adminOnly, social.listReports);
+router.patch('/reports/:reportId', authMiddleware, adminOnly, social.resolveReport);
 router.patch('/posts/:postId/like', authMiddleware, social.likePost);
 router.patch('/posts/:postId/unlike', authMiddleware, social.unlikePost);
 router.post('/posts/:postId/comments', authMiddleware, social.addComment);
