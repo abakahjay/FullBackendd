@@ -6,7 +6,7 @@ const nodemailer = require("nodemailer");
 // production mail goes over HTTPS instead. Picked in this order:
 //   1. MAIL_RELAY_URL + MAIL_RELAY_SECRET - a Google Apps Script web app that
 //      sends from your own Gmail (free, Google-signed, ~100 mails/day).
-//      The script is in static/gmailRelay.gs.
+//      The script is in scripts/gmailRelay.gs (setup steps at its top).
 //   2. BREVO_API_KEY - Brevo's HTTPS API (free 300/day). The sender
 //      (BREVO_SENDER_EMAIL or EMAIL_USER) must be verified in Brevo.
 //   3. EMAIL_USER + EMAIL_PASS - Gmail SMTP (works locally, not on Render free).
