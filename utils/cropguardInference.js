@@ -9,6 +9,9 @@ const { InvalidImageError, loadImage, preprocessEval } = require("./cropguardPre
 // `python -m cropguard_ml.export`; copy artifacts/models/active into
 // CROPGUARD_MODEL_DIR (default data/cropguard/model). There is no fallback or
 // fake prediction: without a valid bundle the prediction routes answer 503.
+// Bundles exported with a leaf check have a second output, "leaf_score" (0-1, is
+// this a crop leaf at all?) and meta.leaf_gate.threshold; below it the photo is
+// refused instead of being forced into one of the 22 classes.
 
 class ModelUnavailableError extends Error {}
 
@@ -48,24 +51,35 @@ class Classifier {
         this.cfg = meta.preprocess;
         this.classes = [...meta.classes].sort((a, b) => a.index - b.index);
         this.inputName = session.inputNames[0];
-        this.outputName = session.outputNames[0];
+        this.outputName = session.outputNames.includes("logits") ? "logits" : session.outputNames[0];
+        const gate = meta.leaf_gate;
+        this.leafOutput = gate && session.outputNames.includes(gate.output) ? gate.output : null;
+        this.leafThreshold = this.leafOutput ? Number(gate.threshold) : null;
     }
 
     get version() {
         return this.meta.name;
     }
 
-    async run(x) {
+    async runAll(x) {
         const size = this.cfg.image_size;
         const tensor = new this.ort.Tensor("float32", x, [1, 3, size, size]);
         const result = await this.session.run({ [this.inputName]: tensor });
-        return result[this.outputName].data;
+        return {
+            logits: result[this.outputName].data,
+            leafScore: this.leafOutput ? result[this.leafOutput].data[0] : null,
+        };
+    }
+
+    async run(x) {
+        return (await this.runAll(x)).logits;
     }
 
     async predict(buffer, { maxPixels, lowConf, smallMargin, topK = 3 }) {
         const t0 = process.hrtime.bigint();
         const img = await loadImage(buffer, maxPixels); // throws InvalidImageError
-        const logits = Array.from(await this.run(preprocessEval(img, this.cfg)));
+        const out = await this.runAll(preprocessEval(img, this.cfg));
+        const logits = Array.from(out.logits);
         const max = Math.max(...logits);
         const exps = logits.map((l) => Math.exp(l - max));
         const sum = exps.reduce((a, b) => a + b, 0);
@@ -97,6 +111,8 @@ class Classifier {
             processingMs: Math.round(Number(process.hrtime.bigint() - t0) / 1e5) / 10,
             imageWidth: img.width,
             imageHeight: img.height,
+            leafScore: out.leafScore === null ? null : Number(out.leafScore.toFixed(4)),
+            isLeaf: out.leafScore === null || out.leafScore >= this.leafThreshold,
         };
     }
 }

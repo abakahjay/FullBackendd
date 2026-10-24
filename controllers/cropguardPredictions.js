@@ -70,6 +70,12 @@ const createPrediction = async (req, res) => {
         await recordFailure(user, client, "inference_error");
         throw fail(500, "inference_error", "Something went wrong while analysing the image.");
     }
+    if (!r.isLeaf) {
+        // Not stored: there is nothing to look back at, and the photo may be of anything.
+        await recordFailure(user, client, "not_a_leaf");
+        throw fail(422, "not_a_leaf",
+            "This doesn't look like a leaf. Please upload a close, sharp photo of one cashew, cassava, maize or tomato leaf.");
+    }
 
     const p = new CropGuardPrediction({
         userId: user._id, status: "success", crop: r.crop, classKey: r.classKey, confidence: r.confidence,

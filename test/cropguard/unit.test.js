@@ -26,6 +26,31 @@ test("classifier loads and predicts", async () => {
     assert.equal(r.imageWidth, 300);
 });
 
+test("leaf check: a low leaf_score is not a leaf; bundles without the check accept every photo", async () => {
+    const meta = JSON.parse(fs.readFileSync(path.join(TINY_MODEL, "meta.json"), "utf8"));
+    const ort = { Tensor: class { constructor(type, data) { this.data = data; } } };
+    const session = (score) => ({
+        inputNames: ["input"],
+        outputNames: ["logits", "leaf_score"],
+        run: async () => ({
+            logits: { data: new Float32Array(meta.classes.length) },
+            leaf_score: { data: new Float32Array([score]) },
+        }),
+    });
+    const gated = { ...meta, leaf_gate: { output: "leaf_score", threshold: 0.5 } };
+    const img = await sharp({ create: { width: 300, height: 200, channels: 3, background: "#808080" } }).png().toBuffer();
+    const opts = { maxPixels: 4e7, lowConf: 0.6, smallMargin: 0.15 };
+
+    const shoe = await new Classifier(ort, session(0.12), gated).predict(img, opts);
+    assert.equal(shoe.isLeaf, false);
+    assert.equal(shoe.leafScore, 0.12);
+    assert.equal((await new Classifier(ort, session(0.93), gated).predict(img, opts)).isLeaf, true);
+
+    const old = await new Classifier(ort, session(0.12), meta).predict(img, opts); // no meta.leaf_gate
+    assert.equal(old.isLeaf, true);
+    assert.equal(old.leafScore, null);
+});
+
 test("missing bundle, tampered model and class mismatch are refused", async () => {
     await assert.rejects(Classifier.load(path.join(os.tmpdir(), "no-such-model")), ModelUnavailableError);
 

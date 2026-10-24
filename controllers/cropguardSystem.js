@@ -40,6 +40,7 @@ const modelInfo = async (req, res) => {
         validation_best: m.validation_best ?? null,
         intended_use: m.intended_use || "",
         dataset: m.dataset ?? null,
+        leaf_gate: m.leaf_gate ? { threshold: m.leaf_gate.threshold, validation: m.leaf_gate.validation, test: m.leaf_gate.test } : null,
         note: "These figures come from CCMT test photos the model never saw in training. They show "
             + "how it did on that data, not whether any one live result is right.",
     });
