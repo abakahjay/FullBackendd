@@ -30,7 +30,7 @@ const { createPasswordReset } = require('../utils/passwordReset.js');
 const { forgotPassword, resetPassword } = createPasswordReset({
     Model: User,
     appKey: 'openlabs',
-    appName: 'your',
+    appName: '', // one account for GH-GPT, Nsoro and Finance Tracker, so name none of them
     displayName: (u) => u.firstName || u.username,
     send: ({ email, subject, text, html }) => sendEmail({ to: email, subject, text, html }),
 });

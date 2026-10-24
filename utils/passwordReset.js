@@ -28,21 +28,22 @@ const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&a
 const backendOrigin = () => (process.env.ORIGIN || "http://localhost:7004").replace(/\/$/, "");
 
 // Plain, spam-filter-friendly email used by apps without their own mailer.
+// Without an appName (an account shared by several apps) it just says "your password".
 const defaultEmail = ({ appName, name, link }) => ({
-    subject: `Reset your ${appName} password`,
+    subject: `Reset your ${appName ? `${appName} ` : ""}password`,
     text: [
         `Hi ${name || "there"},`,
         "",
-        `We received a request to reset the password for your ${appName} account.`,
+        `We received a request to reset the password for your ${appName ? `${appName} ` : ""}account.`,
         `Open this link within 30 minutes to choose a new password:`,
         link,
         "",
         "If you didn't ask for this, you can ignore this email - your password won't change.",
     ].join("\n"),
     html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:auto;color:#1b2d2f;line-height:1.6">
-  <h2 style="margin:0 0 12px">Reset your ${escapeHtml(appName)} password</h2>
+  <h2 style="margin:0 0 12px">Reset your ${appName ? `${escapeHtml(appName)} ` : ""}password</h2>
   <p>Hi ${escapeHtml(name || "there")},</p>
-  <p>We received a request to reset the password for your ${escapeHtml(appName)} account. This link works for 30 minutes and can be used once.</p>
+  <p>We received a request to reset the password for your ${appName ? `${escapeHtml(appName)} ` : ""}account. This link works for 30 minutes and can be used once.</p>
   <p><a href="${escapeHtml(link)}" style="display:inline-block;background:#21927b;color:#fff;text-decoration:none;padding:11px 18px;border-radius:9px;font-weight:bold">Choose a new password</a></p>
   <p style="font-size:13px;color:#6b7c7e">If the button doesn't work, copy this link: <br>${escapeHtml(link)}</p>
   <p style="font-size:13px;color:#6b7c7e">If you didn't ask for this, ignore this email - your password won't change.</p>
@@ -53,7 +54,7 @@ const defaultEmail = ({ appName, name, link }) => ({
  * @param {object}   opts
  * @param {Model}    opts.Model            mongoose model with email/password + resetPasswordToken/resetPasswordExpires
  * @param {string}   opts.appKey           used for the hosted page (?app=)
- * @param {string}   opts.appName          shown in the email
+ * @param {string}   [opts.appName]        shown in the email; leave empty for a shared account
  * @param {Function} opts.send             async ({ user, email, subject, text, html, link }) => void
  * @param {Function} [opts.displayName]    user => name for the greeting
  * @param {Function} [opts.isAllowedRedirect] url => boolean (default: ALLOWED_REDIRECT_DOMAINS)
