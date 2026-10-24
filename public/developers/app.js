@@ -140,11 +140,11 @@ function landing(section) {
     el("span", { class: "k", text: "await" }), " fetch(", el("span", { class: "s", text: "`${API}/data/products`" }), ", {\n",
     "  headers: { ", el("span", { class: "s", text: '"X-App-Key"' }), ": ", el("span", { class: "s", text: '"pk_…"' }), " }\n",
     "});\n", el("span", { class: "muted", text: "// → { items: [...], total: 42 }" }));
-  const feat = (ic, title, text) => el("div", { class: "card" }, icon(ic), el("h3", { text: title }), el("p", { text }));
+  // Capabilities as a definition list (same layout as the homepage), not icon cards.
+  const feat = (ic, title, text) => el("div", {}, el("dt", { text: title }), el("dd", { text }));
   const page = el("div", {},
     el("section", { class: "wrap hero" },
       el("div", {},
-        el("span", { class: "eyebrow" }, "For frontend developers"),
         el("h1", {}, "Your frontend. ", el("em", { text: "Our backend." }), " Live in minutes."),
         el("p", { class: "lead", text: "Register your site, describe the data your app needs in plain words, and get a secure REST API with user accounts, password reset, file uploads and docs. No server to write or host." }),
         el("div", { class: "hero-cta" },
@@ -154,7 +154,6 @@ function landing(section) {
 
     el("section", { class: "section", id: "about" }, el("div", { class: "wrap about" },
       el("div", {},
-        el("span", { class: "eyebrow" }, "About"),
         el("h2", { text: "One backend behind many apps" }),
         el("p", { class: "intro", text: "FullBackend is the shared Express and MongoDB server that already runs GH-GPT, Nsoro, CleanBridge GH, SeedBridge and GhanaCropGuard AI. The developer platform opens it up: any frontend, a React site, a mobile app or a student project, can get its own isolated backend on it." })),
       el("ul", {},
@@ -164,9 +163,8 @@ function landing(section) {
         el("li", { text: "Nothing you submit is executed as code, so your app can't break anyone else's." })))),
 
     el("section", { class: "section", id: "features" }, el("div", { class: "wrap" },
-      el("span", { class: "eyebrow" }, "Features"),
       el("h2", { text: "Everything a small app needs" }),
-      el("div", { class: "grid-3" },
+      el("dl", { class: "features" },
         feat("users", "User accounts", "Sign-up, sign-in, profile, change password, forgot/reset password by email and account deletion, out of the box."),
         feat("db", "Your own collections", "Typed fields (text, numbers, dates, emails, lists, choices, files) with list, filter, sort, create, update and delete routes."),
         feat("lock", "Access rules", "Per collection: public, signed-in users, the record's owner, or your server only. Enforced on every request."),
@@ -175,18 +173,16 @@ function landing(section) {
         feat("doc", "Live docs", "Every app has a docs endpoint listing its routes, fields and access rules, always in sync with your settings.")))),
 
     el("section", { class: "section", id: "how" }, el("div", { class: "wrap" },
-      el("span", { class: "eyebrow" }, "How it works"),
       el("h2", { text: "From sign-up to first request" }),
-      el("div", { class: "steps" },
-        el("div", { class: "card" }, el("h3", { text: "Create an app" }), el("p", { text: "Give it a name. You get a publishable key for your frontend and a secret key for your own server." })),
-        el("div", { class: "card" }, el("h3", { text: "Add your frontend URLs" }), el("p", { text: "e.g. https://myapp.onrender.com. Localhost on any port works while you develop." })),
-        el("div", { class: "card" }, el("h3", { text: "Add APIs" }), el("p", { text: "Describe what you need and click Create, or start from a template. Routes are live at once." })),
-        el("div", { class: "card" }, el("h3", { text: "Call it" }), el("p", { text: "Send X-App-Key with each request, plus the user's token once they sign in." }))))),
+      el("ol", { class: "steps" },
+        el("li", {}, el("h3", { text: "Create an app" }), el("p", { text: "Give it a name. You get a publishable key for your frontend and a secret key for your own server." })),
+        el("li", {}, el("h3", { text: "Add your frontend URLs" }), el("p", { text: "e.g. https://myapp.onrender.com. Localhost on any port works while you develop." })),
+        el("li", {}, el("h3", { text: "Add APIs" }), el("p", { text: "Describe what you need and click Create, or start from a template. Routes are live at once." })),
+        el("li", {}, el("h3", { text: "Call it" }), el("p", { text: "Send X-App-Key with each request, plus the user's token once they sign in." }))))),
 
     el("section", { class: "section", id: "security" }, el("div", { class: "wrap" },
-      el("span", { class: "eyebrow" }, "Security"),
       el("h2", { text: "Secure by default" }),
-      el("div", { class: "grid-3" },
+      el("dl", { class: "features" },
         feat("globe", "Your sites only", "Browsers may only use your key from the frontend URLs you registered. A secret key sent from a browser is refused."),
         feat("lock", "Strict validation", "Unknown fields, wrong types and query operators are rejected before anything reaches the database."),
         feat("gauge", "Limits and quotas", "Rate limits on sign-in and writes, record and storage quotas per app, bcrypt passwords, revocable sessions.")))),

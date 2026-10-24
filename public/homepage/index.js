@@ -1,91 +1,79 @@
-const navToggle = document.querySelector('.nav-toggle');
-const navLinks = document.querySelector('.nav-links');
-const logins = document.querySelector('.logins');
+document.getElementById('year').textContent = new Date().getFullYear();
 
-navToggle.addEventListener('click', () => {
-    navLinks.classList.toggle('active');
-    navToggle.classList.toggle('active');
-    logins?.classList.toggle('active');
-});
+// ---------------------------------------------------------------------
+// Live API status: one real request to the server, timed in the browser.
+// ---------------------------------------------------------------------
+const status = document.getElementById('status');
+const statusText = document.getElementById('status-text');
+
+async function checkStatus() {
+    const t0 = performance.now();
+    try {
+        const res = await fetch('/api/v1/cropguard/health', { cache: 'no-store' });
+        if (!res.ok) throw new Error(String(res.status));
+        const ms = Math.round(performance.now() - t0);
+        status.classList.add('up');
+        statusText.textContent = `API online · answered in ${ms} ms`;
+    } catch {
+        status.classList.add('down');
+        statusText.textContent = 'API is waking up, try again in a minute';
+    }
+}
+checkStatus();
 
 // ---------------------------------------------------------------------
 // Accounts live in the developer portal (/developers/). If its token
-// (localStorage "fb_dev_token") is still valid, swap Log in / Get started
+// (localStorage "fb_dev_token") is still valid, swap Sign in / Get started
 // for a chip that opens the dashboard - re-verified against the API on
-// every load, so an expired token falls back to logged-out.
+// every load, so an expired token falls back to signed-out.
 // ---------------------------------------------------------------------
-
+const logins = document.querySelector('.logins');
 const TOKEN_KEY = 'fb_dev_token';
 const readToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } };
 const clearToken = () => { try { localStorage.removeItem(TOKEN_KEY); } catch { /* private mode */ } };
+const signedOutHtml = logins ? logins.innerHTML : '';
 
 function renderLoggedOut() {
-    if (!logins) return;
-    logins.innerHTML = '';
-
-    const loginLink = document.createElement('a');
-    loginLink.href = '/developers/#/signin';
-    loginLink.textContent = 'Log in';
-
-    const signupLink = document.createElement('a');
-    signupLink.href = '/developers/#/signup';
-    const signupBtn = document.createElement('button');
-    signupBtn.className = 'start';
-    signupBtn.textContent = 'Get started';
-    signupLink.appendChild(signupBtn);
-
-    logins.append(loginLink, signupLink);
+    if (logins) logins.innerHTML = signedOutHtml;
 }
 
 function renderLoggedIn(dev) {
     if (!logins) return;
+    const label = dev.name || dev.email || 'Account';
     logins.innerHTML = '';
 
-    const label = dev.name || dev.email || 'Account';
-    const profileLink = document.createElement('a');
-    profileLink.href = '/developers/#/apps';
-    profileLink.className = 'nav-profile-link';
+    const row = document.createElement('div');
+    row.className = 'account';
 
-    const fallback = document.createElement('span');
-    fallback.className = 'nav-avatar nav-avatar-fallback';
-    fallback.textContent = label.charAt(0).toUpperCase();
-    profileLink.appendChild(fallback);
+    const link = document.createElement('a');
+    link.href = '/developers/#/apps';
+    link.className = 'account-link';
+    const avatar = document.createElement('span');
+    avatar.className = 'account-avatar';
+    avatar.textContent = label.charAt(0).toUpperCase();
+    const name = document.createElement('span');
+    name.className = 'account-name';
+    name.textContent = label;
+    link.append(avatar, name);
 
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'nav-username';
-    nameSpan.textContent = label;
-    profileLink.appendChild(nameSpan);
-
-    const logoutBtn = document.createElement('button');
-    logoutBtn.type = 'button';
-    logoutBtn.className = 'nav-logout';
-    logoutBtn.title = 'Log out';
-    logoutBtn.setAttribute('aria-label', 'Log out');
-    logoutBtn.innerHTML = '<i class="fas fa-arrow-right-from-bracket"></i>';
-    logoutBtn.addEventListener('click', () => {
+    const out = document.createElement('button');
+    out.type = 'button';
+    out.className = 'btn btn-ghost btn-sm';
+    out.textContent = 'Sign out';
+    out.addEventListener('click', () => {
         clearToken();
         renderLoggedOut();
     });
 
-    // Wrapped in one row so the chip and logout button stay side-by-side
-    // even inside .logins.active's column layout on mobile.
-    const row = document.createElement('div');
-    row.className = 'nav-account-row';
-    row.append(profileLink, logoutBtn);
+    row.append(link, out);
     logins.append(row);
 }
 
 async function checkAuth() {
     const token = readToken();
-    if (!token) {
-        renderLoggedOut();
-        return;
-    }
-
+    if (!token) return;
     try {
-        const res = await fetch('/api/v1/platform/auth/me', {
-            headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await fetch('/api/v1/platform/auth/me', { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) throw new Error('Session is no longer valid');
         renderLoggedIn(await res.json());
     } catch {
@@ -93,5 +81,4 @@ async function checkAuth() {
         renderLoggedOut();
     }
 }
-
 checkAuth();
