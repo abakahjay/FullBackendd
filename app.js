@@ -149,6 +149,10 @@ app.use(SEEDBRIDGE_WEBHOOK_PATH, express.raw({ type: 'application/json' }));
 // namespace and answers every request under it (routes/cropguard.js).
 app.use('/api/v1/cropguard', require('./routes/cropguard.js'));
 
+// JayRouter database backups (encrypted SQLite snapshots). Before the global
+// parsers: uploads are raw octet-stream bytes (routes/jayrouterBackup.js).
+app.use('/api/v1/jayrouter', require('./routes/jayrouterBackup.js'));
+
 // Developer platform: developers register apps (frontend URLs + data collections) and
 // get a generated API for each. Same rule as CropGuard: mounted before the global
 // parsers/sanitizers because it validates its own input (routes/platform.js).
