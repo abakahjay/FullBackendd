@@ -153,6 +153,11 @@ app.use('/api/v1/cropguard', require('./routes/cropguard.js'));
 // parsers: uploads are raw octet-stream bytes (routes/jayrouterBackup.js).
 app.use('/api/v1/jayrouter', require('./routes/jayrouterBackup.js'));
 
+// CODM Campus Showdown (UMaT Call of Duty: Mobile tournament). Before the global
+// parsers like CropGuard: it parses and validates its own input, and its Paystack
+// webhook needs the raw body (routes/codm.js).
+app.use('/api/v1/codm', require('./routes/codm.js'));
+
 // Developer platform: developers register apps (frontend URLs + data collections) and
 // get a generated API for each. Same rule as CropGuard: mounted before the global
 // parsers/sanitizers because it validates its own input (routes/platform.js).

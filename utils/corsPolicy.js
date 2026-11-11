@@ -76,7 +76,8 @@ function corsOptions(req, callback) {
         credentials: allowsCredentials(origin),
         methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         // X-App-Key: developer-platform apps identify themselves with it (routes/platform.js).
-        allowedHeaders: ["Content-Type", "Authorization", "X-App-Key"],
+        // X-Codm-Session: the CODM site's browser-session id for its login lockout.
+        allowedHeaders: ["Content-Type", "Authorization", "X-App-Key", "X-Codm-Session"],
         maxAge: 600,
     });
 }

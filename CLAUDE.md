@@ -450,6 +450,54 @@ It matched Python bit for bit on CCMT photos and edge cases (odd sizes, RGBA, gr
 - It also checks that CleanBridge still answers with `{ msg }` and that `/api-docs.json` still lists every app.
 - Admin CLI: `node scripts/cropguardCreateAdmin.js <email>` (prompts for the password).
 
+## CODM Campus Showdown (`/api/v1/codm/*`)
+
+Backend for the UMaT Call of Duty: Mobile tournament site (React + Vite frontend in `Desktop/VS Projects/CODM`).
+Players register, create or join a 5-player team with a 6-character invite code, and each pays the GH₵50 entry
+fee through Paystack. A team is **confirmed** when it has 5 members and all 5 have paid.
+- One router, `routes/codm.js`, mounted in app.js **before** the global parsers/sanitizers (like CropGuard). It sets
+  helmet, its own rate limit, `express.json({ limit: "20kb" })`, and a raw body for `POST /payments/webhook`. Every
+  input goes through `check.*` in `utils/codm.js` (type + pattern) before any query. Errors are the normal
+  `errors/*` classes, answered by the global handler as `{ msg }`; validation is 400, only bad/missing tokens are 401.
+- Models: `CodmPlayer` (own collection; bcrypt-12 `passwordHash`; `role` player/admin, never from a body),
+  `CodmTeam` (`nameKey` = lower-cased name, unique), `CodmPayment` (one row per checkout).
+- Tokens: `{ sub, role, tv, app: "codm" }`, no `userId` claim, Bearer header only (`middleware/codmAuth.js`).
+  Password change bumps `tokenVersion`. Admins: `node scripts/codmMakeAdmin.js <email>`.
+- Team changes are atomic: the player is claimed (`teamId: null` → team) before the team is touched, and joins use
+  `members.<size-1> $exists: false` so a team can never pass `CODM_TEAM_SIZE`. A captain who leaves hands over to the
+  longest-standing member; the last member leaving deletes the team. Payment stays with the player.
+- Paystack: the amount comes from `CODM_ENTRY_FEE_GHS`; `callbackUrl` must pass `isAllowedCodmRedirect`
+  (`ALLOWED_REDIRECT_DOMAINS` or the origin of `CODM_CLIENT_URL`). A player is marked paid only by
+  `applySuccessfulCharge()` after amount, currency, `metadata.app === "codm"` and `metadata.playerId` match, from
+  the verify call or the HMAC-checked webhook. Key: `CODM_PAYSTACK_SECRET_KEY`; otherwise in production only `PAYSTACK_SECRET_KEY` (never the TEST key) and only
+  charges with `domain: "live"` count (`CODM_ALLOW_TEST_PAYMENTS=true` for staging); locally the TEST key is used.
+  Payment/join limiters are keyed per player, sign-ups 400/h per IP (campus NAT).
+  A Paystack account has one webhook URL: only point it at `/api/v1/codm/payments/webhook` if no other app needs it;
+  the verify call alone is enough.
+- Event settings (fee, prize, team size, max teams, start, registration close, venue, WhatsApp link) are `CODM_*`
+  env vars with defaults in `eventConfig()`. Registration closes at `CODM_REGISTRATION_CLOSES_AT`.
+- **Paying registers you**: create/join team require `player.paid`. Admins can record cash payments
+  (`PATCH /admin/players/:id/paid`, reference `cash_…`); Paystack payments can't be undone there.
+- **Knockout bracket** (`models/CodmBracket.js`, one doc `_id: "main"`, `controllers/codmBracket.js`): `POST /admin/bracket/generate`
+  draws all confirmed teams at random into single elimination, sized to the next power of two, byes spread evenly and
+  advanced at once. Match ids `r<round>m<index>`; the winner goes to `r+1`/`m>>1`, slot A for even index. `PATCH
+  /admin/bracket/matches/:id` sets `winnerTeamId` (or null to undo, only while the next match is undecided), `startsAt`,
+  `note`, `score`. `GET /bracket` (public) returns rounds, `upNext` and `champion`. Team changes lock once a bracket exists;
+  `DELETE /admin/bracket { confirm: "RESET" }` removes it.
+- **Login lockout** (`login` in `controllers/codmAuth.js`, `models/CodmLoginAttempt.js`): keyed by sha256 of the browser
+  session id (`X-Codm-Session`, kept by the site in sessionStorage; falls back to the IP) and the identifier. After 4 wrong
+  passwords: locked 30 s, then doubling per further miss up to 1 h, answered as 429 with `Retry-After`. A new browser
+  session starts from zero (organiser's choice), so there is also a per-account row (session ignored): 20 misses in 15 min
+  (`CODM_ACCOUNT_LOGIN_FAILURES_PER_15_MIN`) locks the account 15 min. Counters use atomic `$inc`. Unknown accounts still
+  run a dummy bcrypt compare (timing). The route's per-IP limiter (150 failures / 15 min, campus NAT) is the last backstop. Stored in Mongo with a TTL so it works across several instances. `X-Codm-Session` is in `utils/corsPolicy.js`.
+- **Load**: `GET /event`, `/teams`, `/bracket` go through `cachedPublic()` (`utils/codm.js`, `CODM_PUBLIC_CACHE_MS`, default
+  4 s, in-flight requests shared) and send `Cache-Control: public, max-age=4, stale-while-revalidate=30`. Every write that
+  changes them calls `clearPublicCache()`. Nothing else is kept in process memory, so the API can run as several Render
+  instances; the express-rate-limit counters are per instance.
+- Organiser accounts: `CODM_BOOTSTRAP_ADMIN_EMAILS` + `CODM_BOOTSTRAP_ADMIN_PASSWORD` (`utils/codmBootstrap.js`) create
+  missing admins at startup; sign-up refuses those emails; an existing player account is never auto-promoted.
+- Admin: `GET /admin/overview`, `GET /admin/export.csv` (cells starting with = + - @ are prefixed against CSV injection).
+
 ## Developer platform (`/developers`, `/api/v1/platform/*`, `/api/v1/apps/<slug>/*`)
 
 Lets outside developers register an app (frontend URLs, data collections) and get a generated REST API, with no code of theirs ever running here.
