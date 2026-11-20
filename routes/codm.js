@@ -116,6 +116,7 @@ router.get("/admin/overview", codmAuth, requireCodmAdmin, admin.overview);
 router.get("/admin/export.csv", codmAuth, requireCodmAdmin, admin.exportCsv);
 router.patch("/admin/players/:playerId/paid", codmAuth, requireCodmAdmin, admin.setPaid);
 router.patch("/admin/players/:playerId", codmAuth, requireCodmAdmin, admin.updatePlayer);
+router.delete("/admin/players/:playerId", codmAuth, requireCodmAdmin, admin.deletePlayer);
 router.post("/admin/bracket/generate", codmAuth, requireCodmAdmin, bracket.generateBracket);
 router.patch("/admin/bracket/matches/:matchId", codmAuth, requireCodmAdmin, bracket.updateMatch);
 router.delete("/admin/bracket", codmAuth, requireCodmAdmin, bracket.resetBracket);
