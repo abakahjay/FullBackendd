@@ -10,6 +10,9 @@ const CodmEventStateSchema = new mongoose.Schema(
         cancelledAt: { type: Date, default: null },
         cancelledBy: { type: String, default: null },
         cancelReason: { type: String, default: null },
+        // Organiser emails deleted from the admin page: utils/codmBootstrap.js won't recreate
+        // them even while they are still listed in CODM_BOOTSTRAP_ADMIN_EMAILS.
+        removedOrganisers: { type: [String], default: [] },
     },
     { timestamps: true }
 );

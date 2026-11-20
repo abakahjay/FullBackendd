@@ -134,7 +134,8 @@ const updatePlayer = async (req, res) => {
 // DELETE /api/v1/codm/admin/players/:playerId  { confirm: "<the player's email>" }
 // Removes an account that has not paid and is not in a team (duplicates, mistakes),
 // including another organiser's (never your own, never the last one). An organiser
-// listed in CODM_BOOTSTRAP_ADMIN_EMAILS is created again on restart: remove it there too.
+// deleted here is remembered in CodmEventState.removedOrganisers, so the start-up bootstrap
+// does not recreate it from CODM_BOOTSTRAP_ADMIN_EMAILS.
 // Paid players must be refunded first so no money is ever left without an owner.
 const deletePlayer = async (req, res) => {
     const playerId = check.objectId(req.params.playerId, "player");
@@ -147,6 +148,9 @@ const deletePlayer = async (req, res) => {
     if (player.teamId) throw new BadRequestError("Take the player out of their team first.");
     await CodmPayment.deleteMany({ playerId: player._id, status: { $ne: "success" } });
     await CodmPlayer.deleteOne({ _id: player._id, paid: false, teamId: null });
+    if (player.role === "admin") {
+        await require("../models/CodmEventState.js").updateOne({ _id: "main" }, { $addToSet: { removedOrganisers: player.email } }, { upsert: true });
+    }
     console.log(`[codm] admin ${req.player.email} deleted player ${player.email}`);
     require("../utils/codm.js").clearPublicCache();
     res.status(StatusCodes.OK).json(await buildOverview());

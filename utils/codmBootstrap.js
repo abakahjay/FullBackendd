@@ -15,7 +15,15 @@ const run = async () => {
     const emails = adminEmails();
     if (!emails.length) return;
     const password = process.env.CODM_BOOTSTRAP_ADMIN_PASSWORD || "";
+    let removed = [];
+    try {
+        const state = await require("../models/CodmEventState.js").findById("main").select("removedOrganisers").lean();
+        removed = (state && state.removedOrganisers) || [];
+    } catch (err) {
+        console.log(`[codm] could not read removed organisers: ${err.message}`);
+    }
     for (const email of emails) {
+        if (removed.includes(email)) continue; // deleted from the admin page; don't bring it back
         try {
             const existing = await CodmPlayer.findOne({ email });
             if (existing) {
