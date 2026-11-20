@@ -9,7 +9,25 @@ const { isAllowedRedirectUri } = require("./oauthRedirect.js");
 // ---------------------------------------------------------------------------
 const num = (value, fallback) => (Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback);
 
-const eventConfig = () => ({
+// Paystack's Ghana fee is 1.95% on cards, MoMo and bank transfer. With
+// CODM_PASS_FEES on (the default) the player pays it on top, using Paystack's own
+// formula price / (1 - fee), rounded up to the pesewa, so the organiser still
+// receives the full entry fee. Only one place may add the fee: keep Paystack's
+// dashboard option "customers pay the transaction fee" OFF.
+const feeBreakdown = (entryFeeGhs, passFees, feePercent) => {
+    const entry = Math.round(entryFeeGhs * 100);
+    const total = passFees ? Math.ceil(entry / (1 - feePercent / 100)) : entry;
+    return { processingFeeGhs: (total - entry) / 100, totalChargeGhs: total / 100, totalChargePesewas: total };
+};
+
+const eventConfig = () => {
+    const cfg = baseConfig();
+    return { ...cfg, ...feeBreakdown(cfg.entryFeeGhs, cfg.passFees, cfg.feePercent) };
+};
+
+const baseConfig = () => ({
+    passFees: process.env.CODM_PASS_FEES !== "false",
+    feePercent: num(process.env.CODM_PAYSTACK_FEE_PERCENT, 1.95),
     name: process.env.CODM_EVENT_NAME || "CODM Campus Showdown",
     entryFeeGhs: num(process.env.CODM_ENTRY_FEE_GHS, 50),
     prizeGhs: num(process.env.CODM_PRIZE_GHS, 3000),

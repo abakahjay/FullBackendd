@@ -43,7 +43,11 @@ const applySuccessfulCharge = async (data) => {
     }
     const payment = await CodmPayment.findOne({ reference: String(data.reference || "") });
     if (!payment) return null;
-    if (data.amount !== payment.amountPesewas || data.metadata?.playerId !== String(payment.playerId) || data.metadata?.app !== "codm") {
+    // amount is what the player paid. If Paystack's dashboard "customer pays the fee"
+    // option were ever switched on, Paystack adds its fee and keeps our figure in
+    // requested_amount, so accept that too.
+    const amountOk = data.amount === payment.amountPesewas || data.requested_amount === payment.amountPesewas;
+    if (!amountOk || data.metadata?.playerId !== String(payment.playerId) || data.metadata?.app !== "codm") {
         console.warn(`[codm] payment ${payment.reference} did not match (amount/player); not marking paid`);
         return null;
     }
@@ -72,7 +76,7 @@ const initializePayment = async (req, res) => {
     if (player.paid) throw new BadRequestError("You have already paid. See you on match day!");
 
     const cfg = eventConfig();
-    const amount = pesewas(cfg.entryFeeGhs);
+    const amount = cfg.totalChargePesewas; // entry fee + Paystack fee (see feeBreakdown in utils/codm.js)
     const reference = `codm_${player._id}_${Date.now()}${crypto.randomBytes(3).toString("hex")}`;
     await CodmPayment.create({ reference, playerId: player._id, amountPesewas: amount });
 
@@ -91,6 +95,7 @@ const initializePayment = async (req, res) => {
                 custom_fields: [
                     { display_name: "Event", variable_name: "event", value: cfg.name },
                     { display_name: "Player", variable_name: "player", value: `${player.ign} (${player.codmUid})` },
+                    { display_name: "Breakdown", variable_name: "breakdown", value: `Entry GH₵${cfg.entryFeeGhs.toFixed(2)} + Paystack fee GH₵${cfg.processingFeeGhs.toFixed(2)}` },
                 ],
             },
         });

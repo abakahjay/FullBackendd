@@ -466,7 +466,10 @@ fee through Paystack. A team is **confirmed** when it has 5 members and all 5 ha
 - Team changes are atomic: the player is claimed (`teamId: null` → team) before the team is touched, and joins use
   `members.<size-1> $exists: false` so a team can never pass `CODM_TEAM_SIZE`. A captain who leaves hands over to the
   longest-standing member; the last member leaving deletes the team. Payment stays with the player.
-- Paystack: the amount comes from `CODM_ENTRY_FEE_GHS`; `callbackUrl` must pass `isAllowedCodmRedirect`
+- Paystack: the amount is `CODM_ENTRY_FEE_GHS` plus Paystack's fee when `CODM_PASS_FEES` is on (default): `feeBreakdown()` in
+  `utils/codm.js`, Paystack's formula price / (1 − `CODM_PAYSTACK_FEE_PERCENT`, 1.95), rounded up to the pesewa (GH₵50 → GH₵51.00).
+  `/event` exposes `processingFeeGhs`/`totalChargeGhs`. The paid check also accepts `requested_amount`. Cash payments
+  recorded by admins stay at the entry fee; `callbackUrl` must pass `isAllowedCodmRedirect`
   (`ALLOWED_REDIRECT_DOMAINS` or the origin of `CODM_CLIENT_URL`). A player is marked paid only by
   `applySuccessfulCharge()` after amount, currency, `metadata.app === "codm"` and `metadata.playerId` match, from
   the verify call or the HMAC-checked webhook. Key: `CODM_PAYSTACK_SECRET_KEY`; otherwise in production only `PAYSTACK_SECRET_KEY` (never the TEST key) and only
