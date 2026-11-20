@@ -10,7 +10,10 @@ const publicHeaders = (res) => res.set("Cache-Control", `public, max-age=${Math.
 const CodmBracket = require("../models/CodmBracket.js");
 
 // Team changes stop when registration closes or once the bracket has been drawn.
+const CodmEventState = require("../models/CodmEventState.js");
+
 const assertOpen = async () => {
+    if (await CodmEventState.exists({ _id: "main", cancelledAt: { $ne: null } })) throw new BadRequestError("The tournament has been cancelled.");
     if (!registrationOpen()) throw new BadRequestError("Registration is closed. Contact the organiser on WhatsApp.");
     if (await CodmBracket.exists({ _id: "main" })) throw new BadRequestError("The bracket has been drawn, so teams are locked. Contact the organiser.");
 };
@@ -43,16 +46,21 @@ const toMyTeamDTO = async (team) => {
 // GET /api/v1/codm/event  (public)
 const buildEvent = async () => {
     const cfg = eventConfig();
-    const [teams, players, paidList] = await Promise.all([
+    const [teams, players, paidList, state] = await Promise.all([
         CodmTeam.find().select("members").lean(),
         CodmPlayer.countDocuments({ isActive: true, role: "player" }),
         CodmPlayer.find({ paid: true }).select("_id").lean(),
+        CodmEventState.findById("main").lean(),
     ]);
+    const cancelled = !!state?.cancelledAt;
     const paidIds = new Set(paidList.map((p) => String(p._id)));
     const confirmedTeams = teams.filter((t) => t.members.length === cfg.teamSize && t.members.every((id) => paidIds.has(String(id)))).length;
     return {
         ...cfg,
-        registrationOpen: registrationOpen(),
+        registrationOpen: !cancelled && registrationOpen(),
+        cancelled,
+        cancelledAt: cancelled ? state.cancelledAt : null,
+        cancelReason: cancelled ? state.cancelReason : null,
         teamsRegistered: teams.length,
         teamSlotsLeft: Math.max(0, cfg.maxTeams - teams.length),
         confirmedTeams,
@@ -242,4 +250,4 @@ const removeMember = async (req, res) => {
     res.status(StatusCodes.OK).json({ team: updated ? await toMyTeamDTO(updated) : null });
 };
 
-module.exports = { getEvent, listTeams, getMyTeam, createTeam, joinTeam, leaveTeam, updateMyTeam, regenerateInviteCode, removeMember };
+module.exports = { removeFromTeam, getEvent, listTeams, getMyTeam, createTeam, joinTeam, leaveTeam, updateMyTeam, regenerateInviteCode, removeMember };

@@ -15,6 +15,7 @@ const playerRow = (p, captainId) => ({
     paid: !!p.paid,
     paidAt: p.paidAt,
     paymentChannel: p.paymentChannel,
+    refundedAt: p.refundedAt || null,
     isCaptain: captainId ? String(p._id) === String(captainId) : false,
     createdAt: p.createdAt,
 });

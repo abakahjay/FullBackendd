@@ -22,6 +22,8 @@ const CodmPlayerSchema = new mongoose.Schema(
         paidAt: { type: Date, default: null },
         paymentReference: { type: String, default: null },
         paymentChannel: { type: String, default: null },
+        // Set when an admin refunds the entry (the player is then unpaid and out of their team).
+        refundedAt: { type: Date, default: null },
         // Bumped on password change: revokes every token issued before it.
         tokenVersion: { type: Number, default: 0 },
         isActive: { type: Boolean, default: true },

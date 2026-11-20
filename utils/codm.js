@@ -130,6 +130,7 @@ const toPlayerDTO = (p) => ({
     paid: !!p.paid,
     paidAt: p.paidAt,
     paymentChannel: p.paymentChannel,
+    refundedAt: p.refundedAt || null,
     createdAt: p.createdAt,
 });
 

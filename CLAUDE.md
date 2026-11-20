@@ -499,6 +499,16 @@ fee through Paystack. A team is **confirmed** when it has 5 members and all 5 ha
   instances; the express-rate-limit counters are per instance.
 - Organiser accounts: `CODM_BOOTSTRAP_ADMIN_EMAILS` + `CODM_BOOTSTRAP_ADMIN_PASSWORD` (`utils/codmBootstrap.js`) create
   missing admins at startup; sign-up refuses those emails; an existing player account is never auto-promoted.
+- **Refunds** (`controllers/codmRefunds.js`, admin): `POST /admin/players/:id/refund { confirm: true }` refunds one player
+  (Paystack Refund API; cash entries are only recorded as `manual`, the organiser hands the cash back), unpays them and takes
+  them out of their team (refused once a bracket exists, unless the event is cancelled). `POST /admin/refunds/all
+  { confirm: "CANCEL AND REFUND", reason }` sets `CodmEventState` (`_id: "main"`, `cancelledAt`, never cleared by the API),
+  which stops payments and team changes and shows `cancelled` on `/event`, then refunds every Paystack payment in the
+  background; calling it again retries only unfinished ones. `GET /admin/refunds` lists them and refreshes pending ones
+  from Paystack. Each payment is claimed atomically (`refundStatus: "requesting"`, expires after 10 min) before Paystack is
+  called, so nothing is refunded twice; a "fully reversed" answer counts as processed. `applySuccessfulCharge` ignores
+  refunded payments. Paystack keeps its fee on refunds, and a Starter Business's refunds come from pending payouts, so a
+  refund can fail with Paystack's balance message (`refundError`).
 - Admin: `GET /admin/overview`, `GET /admin/export.csv` (cells starting with = + - @ are prefixed against CSV injection).
 
 ## Developer platform (`/developers`, `/api/v1/platform/*`, `/api/v1/apps/<slug>/*`)

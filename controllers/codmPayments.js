@@ -4,6 +4,8 @@ const { StatusCodes } = require("http-status-codes");
 const CodmPlayer = require("../models/CodmPlayer.js");
 const CodmPayment = require("../models/CodmPayment.js");
 const { BadRequestError, NotFoundError } = require("../errors");
+const CodmEventState = require("../models/CodmEventState.js");
+const isCancelled = () => CodmEventState.exists({ _id: "main", cancelledAt: { $ne: null } });
 const { eventConfig, registrationOpen, pesewas, isAllowedCodmRedirect, toPlayerDTO } = require("../utils/codm.js");
 
 // Entry fee via Paystack hosted checkout (MoMo + card, GHS). Same rules as the
@@ -43,6 +45,8 @@ const applySuccessfulCharge = async (data) => {
     }
     const payment = await CodmPayment.findOne({ reference: String(data.reference || "") });
     if (!payment) return null;
+    // A refunded checkout must never make the player paid again (e.g. they reopen the return page).
+    if (payment.refundStatus) return null;
     // amount is what the player paid. If Paystack's dashboard "customer pays the fee"
     // option were ever switched on, Paystack adds its fee and keeps our figure in
     // requested_amount, so accept that too.
@@ -72,6 +76,7 @@ const initializePayment = async (req, res) => {
     }
     if (!secretKey()) throw new BadRequestError("Online payment is not set up yet. Contact the organiser.");
     if (!registrationOpen()) throw new BadRequestError("Registration is closed.");
+    if (await isCancelled()) throw new BadRequestError("The tournament has been cancelled, so payments are closed.");
     const player = req.player;
     if (player.paid) throw new BadRequestError("You have already paid. See you on match day!");
 
@@ -156,4 +161,4 @@ const webhook = async (req, res) => {
     res.sendStatus(StatusCodes.OK);
 };
 
-module.exports = { initializePayment, verifyPayment, webhook, applySuccessfulCharge };
+module.exports = { initializePayment, verifyPayment, webhook, applySuccessfulCharge, paystack, isCancelled };

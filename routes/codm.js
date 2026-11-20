@@ -8,6 +8,7 @@ const teams = require("../controllers/codmTeams.js");
 const payments = require("../controllers/codmPayments.js");
 const admin = require("../controllers/codmAdmin.js");
 const bracket = require("../controllers/codmBracket.js");
+const refunds = require("../controllers/codmRefunds.js");
 require("../utils/codmBootstrap.js"); // creates the organiser accounts from env at startup
 
 // CODM Campus Showdown (UMaT Call of Duty: Mobile tournament): /api/v1/codm/*
@@ -105,5 +106,8 @@ router.patch("/admin/players/:playerId/paid", codmAuth, requireCodmAdmin, admin.
 router.post("/admin/bracket/generate", codmAuth, requireCodmAdmin, bracket.generateBracket);
 router.patch("/admin/bracket/matches/:matchId", codmAuth, requireCodmAdmin, bracket.updateMatch);
 router.delete("/admin/bracket", codmAuth, requireCodmAdmin, bracket.resetBracket);
+router.get("/admin/refunds", codmAuth, requireCodmAdmin, refunds.listRefunds);
+router.post("/admin/refunds/all", codmAuth, requireCodmAdmin, paymentLimiter, refunds.refundAll);
+router.post("/admin/players/:playerId/refund", codmAuth, requireCodmAdmin, paymentLimiter, refunds.refundPlayer);
 
 module.exports = router;
