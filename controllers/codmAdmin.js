@@ -132,7 +132,9 @@ const updatePlayer = async (req, res) => {
 };
 
 // DELETE /api/v1/codm/admin/players/:playerId  { confirm: "<the player's email>" }
-// Removes an account that has not paid and is not in a team (duplicates, mistakes).
+// Removes an account that has not paid and is not in a team (duplicates, mistakes),
+// including another organiser's (never your own, never the last one). An organiser
+// listed in CODM_BOOTSTRAP_ADMIN_EMAILS is created again on restart: remove it there too.
 // Paid players must be refunded first so no money is ever left without an owner.
 const deletePlayer = async (req, res) => {
     const playerId = check.objectId(req.params.playerId, "player");
@@ -140,7 +142,7 @@ const deletePlayer = async (req, res) => {
     if (!player) throw new NotFoundError("Player not found");
     if ((req.body || {}).confirm !== player.email) throw new BadRequestError("Confirm with the player's email address.");
     if (String(player._id) === String(req.player._id)) throw new BadRequestError("You can't delete your own account here.");
-    if (player.role === "admin") throw new BadRequestError("Organiser accounts can't be deleted here.");
+    if (player.role === "admin" && (await CodmPlayer.countDocuments({ role: "admin" })) < 2) throw new BadRequestError("This is the last organiser account, so it can't be deleted.");
     if (player.paid) throw new BadRequestError("This player has paid. Refund them first, then delete the account.");
     if (player.teamId) throw new BadRequestError("Take the player out of their team first.");
     await CodmPayment.deleteMany({ playerId: player._id, status: { $ne: "success" } });

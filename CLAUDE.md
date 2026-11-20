@@ -515,7 +515,7 @@ fee through Paystack. A team is **confirmed** when it has 5 members and all 5 ha
 - Admin: `PATCH /admin/players/:id { fullName?, ign?, codmUid?, phone?, email? }` edits any player (own account included;
   never role, payment or password; `paymentChannel` only for organiser-recorded `cash_` entries:
   Cash, MTN MoMo, Telecel Cash or AirtelTigo Money). `DELETE /admin/players/:id { confirm: <email> }` removes an unpaid,
-  teamless, non-admin account. `GET /admin/overview`, `GET /admin/export.csv` (cells starting with = + - @ are prefixed against CSV injection).
+  teamless account; another organiser's too (never your own or the last one; also drop it from CODM_BOOTSTRAP_ADMIN_EMAILS). `GET /admin/overview`, `GET /admin/export.csv` (cells starting with = + - @ are prefixed against CSV injection).
 
 ## Developer platform (`/developers`, `/api/v1/platform/*`, `/api/v1/apps/<slug>/*`)
 
