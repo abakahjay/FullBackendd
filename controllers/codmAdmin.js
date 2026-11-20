@@ -94,4 +94,28 @@ const setPaid = async (req, res) => {
     res.status(StatusCodes.OK).json(await buildOverview());
 };
 
-module.exports = { overview, exportCsv, setPaid };
+// PATCH /api/v1/codm/admin/players/:playerId  { fullName?, ign?, codmUid?, phone?, email? }
+// Organisers can correct any player's details (their own included). Same validation
+// as sign-up; role, payment and password are never changed here.
+const DUPLICATE = { email: "Another account already uses this email.", phone: "Another account already uses this phone number.", codmUid: "Another account already uses this CODM UID." };
+const updatePlayer = async (req, res) => {
+    const playerId = check.objectId(req.params.playerId, "player");
+    const b = req.body || {};
+    const player = await CodmPlayer.findById(playerId);
+    if (!player) throw new NotFoundError("Player not found");
+    if (b.fullName !== undefined) player.fullName = check.text(b.fullName, "Full name", { min: 2, max: 60 });
+    if (b.ign !== undefined) player.ign = check.ign(b.ign);
+    if (b.codmUid !== undefined) player.codmUid = check.codmUid(b.codmUid);
+    if (b.phone !== undefined) player.phone = check.phone(b.phone);
+    if (b.email !== undefined) player.email = check.email(b.email);
+    try {
+        await player.save();
+    } catch (err) {
+        if (err.code === 11000) throw new BadRequestError(DUPLICATE[Object.keys(err.keyValue || err.keyPattern || {})[0]] || "Another account already has those details.");
+        throw err;
+    }
+    require("../utils/codm.js").clearPublicCache();
+    res.status(StatusCodes.OK).json(await buildOverview());
+};
+
+module.exports = { overview, exportCsv, setPaid, updatePlayer };
