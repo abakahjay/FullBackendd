@@ -15,6 +15,7 @@ const playerRow = (p, captainId) => ({
     paid: !!p.paid,
     paidAt: p.paidAt,
     paymentChannel: p.paymentChannel,
+    manualPayment: String(p.paymentReference || "").startsWith("cash_"),
     refundedAt: p.refundedAt || null,
     isCaptain: captainId ? String(p._id) === String(captainId) : false,
     createdAt: p.createdAt,
@@ -80,7 +81,8 @@ const setPaid = async (req, res) => {
     if (!player) throw new NotFoundError("Player not found");
     if (paid && !player.paid) {
         const reference = `cash_${player._id}_${Date.now()}`;
-        const channel = `Cash (recorded by ${req.player.email})`;
+        const wanted = (req.body || {}).channel;
+        const channel = MANUAL_CHANNELS.includes(wanted) ? wanted : "Cash";
         await CodmPayment.create({ reference, playerId: player._id, amountPesewas: pesewas(eventConfig().entryFeeGhs), status: "success", channel, paidAt: new Date() });
         Object.assign(player, { paid: true, paidAt: new Date(), paymentReference: reference, paymentChannel: channel });
     } else if (!paid && player.paid) {
@@ -95,9 +97,11 @@ const setPaid = async (req, res) => {
 };
 
 // PATCH /api/v1/codm/admin/players/:playerId  { fullName?, ign?, codmUid?, phone?, email? }
-// Organisers can correct any player's details (their own included). Same validation
+// Organisers can correct any player's details (their own included), and the channel of an
+// entry they recorded (paymentChannel: Cash | MTN MoMo | Telecel Cash | AirtelTigo Money). Same validation
 // as sign-up; role, payment and password are never changed here.
 const DUPLICATE = { email: "Another account already uses this email.", phone: "Another account already uses this phone number.", codmUid: "Another account already uses this CODM UID." };
+const MANUAL_CHANNELS = ["Cash", "MTN MoMo", "Telecel Cash", "AirtelTigo Money"];
 const updatePlayer = async (req, res) => {
     const playerId = check.objectId(req.params.playerId, "player");
     const b = req.body || {};
@@ -108,6 +112,14 @@ const updatePlayer = async (req, res) => {
     if (b.codmUid !== undefined) player.codmUid = check.codmUid(b.codmUid);
     if (b.phone !== undefined) player.phone = check.phone(b.phone);
     if (b.email !== undefined) player.email = check.email(b.email);
+    // How an organiser-recorded entry was paid (cash or MoMo straight to the organiser).
+    // Paystack payments keep the channel Paystack reported.
+    if (b.paymentChannel !== undefined) {
+        if (!String(player.paymentReference || "").startsWith("cash_")) throw new BadRequestError("Only entries recorded by an organiser can have their channel changed.");
+        if (!MANUAL_CHANNELS.includes(b.paymentChannel)) throw new BadRequestError(`Channel must be one of: ${MANUAL_CHANNELS.join(", ")}`);
+        player.paymentChannel = b.paymentChannel;
+        await CodmPayment.updateOne({ reference: player.paymentReference }, { channel: b.paymentChannel });
+    }
     try {
         await player.save();
     } catch (err) {
