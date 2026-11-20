@@ -143,6 +143,12 @@ const updateMe = async (req, res) => {
     if (b.fullName !== undefined) p.fullName = check.text(b.fullName, "Full name", { min: 2, max: 60 });
     if (b.ign !== undefined) p.ign = check.ign(b.ign);
     if (b.phone !== undefined) p.phone = check.phone(b.phone);
+    // The UID is fixed once set (it is how organisers find the player in the game).
+    // Accounts made without one (organisers, from CODM_BOOTSTRAP_ADMIN_EMAILS) may set it once.
+    if (b.codmUid !== undefined) {
+        if (p.codmUid) throw new BadRequestError("Your CODM UID is already set. Ask the organiser if it is wrong.");
+        p.codmUid = check.codmUid(b.codmUid);
+    }
     try {
         await p.save();
     } catch (err) {
