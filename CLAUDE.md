@@ -475,6 +475,9 @@ fee through Paystack. A team is **confirmed** when it has 5 members and all 5 ha
   the verify call or the HMAC-checked webhook. Key: `CODM_PAYSTACK_SECRET_KEY`; otherwise in production only `PAYSTACK_SECRET_KEY` (never the TEST key) and only
   charges with `domain: "live"` count (`CODM_ALLOW_TEST_PAYMENTS=true` for staging); locally the TEST key is used.
   Payment/join limiters are keyed per player, sign-ups 400/h per IP (campus NAT).
+  Payments the return page missed (slow MoMo approval, page closed) are caught by `sweepPendingPayments()`: every
+  5 min, plus `POST /payments/sync` (player, on dashboard load) and `POST /admin/payments/sync`, it re-verifies
+  unconfirmed checkouts (`pending`, or `failed` after "abandoned") from the last 3 days with Paystack.
   A Paystack account has one webhook URL: only point it at `/api/v1/codm/payments/webhook` if no other app needs it;
   the verify call alone is enough.
 - Event settings (fee, prize, team size, max teams, start, registration close, venue, WhatsApp link) are `CODM_*`

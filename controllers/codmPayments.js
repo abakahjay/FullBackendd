@@ -161,4 +161,92 @@ const webhook = async (req, res) => {
     res.sendStatus(StatusCodes.OK);
 };
 
-module.exports = { initializePayment, verifyPayment, webhook, applySuccessfulCharge, paystack, isCancelled };
+// ---------------------------------------------------------------------------
+// Catching payments the return page missed.
+//
+// The return page is not enough on its own: a MoMo approval can take minutes, and
+// a player may close Paystack's page or lose network before coming back. Without a
+// webhook nothing would ever look at that payment again, so the player paid but
+// stays "unpaid". These look again at recent checkouts that are not marked
+// success yet (pending, or failed because Paystack said "abandoned" at the time):
+//  - for one player, when their dashboard loads (POST /payments/sync)
+//  - for everyone, every 5 minutes in the background and from the admin page.
+// applySuccessfulCharge does all the checks, so asking twice is harmless.
+const SYNC_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+
+const recheck = async (payment) => {
+    try {
+        const { data } = await paystack().get(`/transaction/verify/${encodeURIComponent(payment.reference)}`);
+        const tx = data.data || {};
+        if (tx.status === "success") return !!(await applySuccessfulCharge(tx));
+        return false;
+    } catch (err) {
+        if (err.response?.status !== 404) console.warn(`[codm] recheck ${payment.reference} failed:`, err.response?.data?.message || err.message);
+        return false;
+    }
+};
+
+const unconfirmed = (extra = {}) => ({
+    status: { $in: ["pending", "failed"] },
+    reference: { $not: /^cash_/ },
+    refundStatus: null,
+    createdAt: { $gt: new Date(Date.now() - SYNC_WINDOW_MS) },
+    ...extra,
+});
+
+// Re-checks one player's recent unconfirmed checkouts (newest first, at most 5).
+const syncPlayerPayments = async (playerId) => {
+    const list = await CodmPayment.find(unconfirmed({ playerId })).sort({ createdAt: -1 }).limit(5).lean();
+    for (const p of list) {
+        if (await recheck(p)) return true;
+    }
+    return false;
+};
+
+// Re-checks everyone's unconfirmed checkouts older than 2 minutes (the return page
+// handles the first minutes). Returns how many became paid.
+let sweeping = false;
+const sweepPendingPayments = async ({ limit = 100 } = {}) => {
+    if (sweeping || !secretKey()) return 0;
+    sweeping = true;
+    let fixed = 0;
+    try {
+        const list = await CodmPayment.find(unconfirmed({ updatedAt: { $lt: new Date(Date.now() - 2 * 60 * 1000) } }))
+            .sort({ createdAt: -1 }).limit(limit).lean();
+        for (const p of list) {
+            const paidAlready = await CodmPlayer.exists({ _id: p.playerId, paid: true });
+            if (paidAlready) continue; // a later checkout already counted; don't take a second payment as the entry
+            if (await recheck(p)) {
+                fixed += 1;
+                console.log(`[codm] payment ${p.reference} confirmed by the background check`);
+            }
+            await new Promise((r) => setTimeout(r, 250));
+        }
+    } finally {
+        sweeping = false;
+    }
+    return fixed;
+};
+
+// POST /api/v1/codm/payments/sync  (player: "I paid, check again")
+const syncMyPayments = async (req, res) => {
+    if (!req.player.paid) await syncPlayerPayments(req.player._id);
+    const player = await CodmPlayer.findById(req.player._id);
+    res.status(StatusCodes.OK).json({ success: !!player.paid, player: toPlayerDTO(player) });
+};
+
+// POST /api/v1/codm/admin/payments/sync  (admin: check every unconfirmed checkout now)
+const adminSyncPayments = async (req, res) => {
+    const pending = await CodmPayment.countDocuments(unconfirmed());
+    const fixed = await sweepPendingPayments({ limit: 300 });
+    res.status(StatusCodes.OK).json({ checked: pending, confirmed: fixed });
+};
+
+// Background check every 5 minutes (each server instance; the checks are idempotent).
+if (process.env.NODE_ENV !== "test") {
+    const timer = setInterval(() => { sweepPendingPayments().catch((e) => console.error("[codm] sweep failed:", e.message)); }, 5 * 60 * 1000);
+    if (timer.unref) timer.unref();
+    setTimeout(() => { sweepPendingPayments().catch(() => {}); }, 30 * 1000).unref?.();
+}
+
+module.exports = { initializePayment, verifyPayment, webhook, applySuccessfulCharge, paystack, isCancelled, syncMyPayments, adminSyncPayments, sweepPendingPayments };

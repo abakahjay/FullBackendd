@@ -20,7 +20,7 @@ const assertOpen = async () => {
 
 // Paying the entry fee is what registers a player: only paid players can be in a team.
 const assertPaid = (player) => {
-    if (!player.paid) throw new BadRequestError("Pay your GH₵ entry fee first. Paying is what registers you for the tournament.");
+    if (!player.paid) throw new BadRequestError("Pay your entry fee first. Paying is what registers you for the tournament.");
 };
 
 const loadMembers = (team) => CodmPlayer.find({ _id: { $in: team.members } }).select("fullName ign phone paid createdAt");

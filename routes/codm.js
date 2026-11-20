@@ -65,6 +65,16 @@ const joinLimiter = rateLimiter({
     message: { msg: "Too many invite-code attempts. Please wait 15 minutes." },
 });
 
+// "Check my payment again" (dashboard load and button): generous, it only reads from Paystack.
+const syncLimiter = rateLimiter({
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    keyGenerator: (req) => `${req.player._id}|codm-sync`,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { msg: "Checked too often. Please wait a few minutes and try again." },
+});
+
 const paymentLimiter = rateLimiter({
     windowMs: 15 * 60 * 1000,
     max: 20,
@@ -98,6 +108,8 @@ router.delete("/teams/mine/members/:playerId", codmAuth, teams.removeMember);
 // Entry fee (Paystack)
 router.post("/payments/initialize", codmAuth, paymentLimiter, payments.initializePayment);
 router.get("/payments/verify/:reference", codmAuth, payments.verifyPayment);
+router.post("/payments/sync", codmAuth, syncLimiter, payments.syncMyPayments);
+router.post("/admin/payments/sync", codmAuth, requireCodmAdmin, payments.adminSyncPayments);
 
 // Organisers
 router.get("/admin/overview", codmAuth, requireCodmAdmin, admin.overview);
