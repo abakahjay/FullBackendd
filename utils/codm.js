@@ -35,9 +35,9 @@ const baseConfig = () => ({
     maxTeams: Math.round(num(process.env.CODM_MAX_TEAMS, 32)),
     mode: process.env.CODM_MODE || "Multiplayer 5v5",
     // 5:00 PM Ghana time (UTC+0) on Saturday 21 November 2026.
-    startsAt: process.env.CODM_STARTS_AT || "2026-11-21T17:00:00Z",
+    startsAt: process.env.CODM_STARTS_AT || "2026-11-28T17:00:00Z",
     // Team changes and payments stop at this moment (default: 2 h before start).
-    registrationClosesAt: process.env.CODM_REGISTRATION_CLOSES_AT || "2026-11-21T15:00:00Z",
+    registrationClosesAt: process.env.CODM_REGISTRATION_CLOSES_AT || "2026-11-28T15:00:00Z",
     venue: process.env.CODM_VENUE || "UMaT Campus, Tarkwa",
     contacts: {
         organiser: ["0257445431", "0532900914"],
