@@ -517,6 +517,8 @@ fee through Paystack. A team is **confirmed** when it has 5 members and all 5 ha
   Charge API (`mobile_money`, provider from `detectNetwork`; the PIN is typed on the phone), `POST /admin/refunds/fund/:ref/otp`
   submits an OTP if the network asks, and `GET /admin/refunds/fund/:ref` verifies the charge and then runs the refund once
   (`models/CodmRefundFunding.js`, `refundStarted` claimed atomically). References are `codmfund_<paymentId>_<ms>`.
+  `POST /admin/refunds/all/fund { confirm, reason }` does the same for everyone: one prompt for the sum of the unrefunded
+  online entries (GH₵50 each); once paid it cancels the event and runs the refund-everyone job (`codmfundall_<ms>`, kind "all").
 - Admin: `PATCH /admin/players/:id { fullName?, ign?, codmUid?, phone?, email? }` edits any player (own account included;
   never role, payment or password; `paymentChannel` only for organiser-recorded `cash_` entries:
   Cash, MTN MoMo, Telecel Cash or AirtelTigo Money). `DELETE /admin/players/:id { confirm: <email> }` removes an unpaid,

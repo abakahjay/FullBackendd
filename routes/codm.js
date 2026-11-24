@@ -122,6 +122,7 @@ router.patch("/admin/bracket/matches/:matchId", codmAuth, requireCodmAdmin, brac
 router.delete("/admin/bracket", codmAuth, requireCodmAdmin, bracket.resetBracket);
 router.get("/admin/refunds", codmAuth, requireCodmAdmin, refunds.listRefunds);
 router.post("/admin/refunds/all", codmAuth, requireCodmAdmin, paymentLimiter, refunds.refundAll);
+router.post("/admin/refunds/all/fund", codmAuth, requireCodmAdmin, paymentLimiter, refunds.fundRefundAll);
 router.post("/admin/players/:playerId/refund", codmAuth, requireCodmAdmin, paymentLimiter, refunds.refundPlayer);
 router.post("/admin/players/:playerId/refund/fund", codmAuth, requireCodmAdmin, paymentLimiter, refunds.fundRefund);
 router.post("/admin/refunds/fund/:reference/otp", codmAuth, requireCodmAdmin, paymentLimiter, refunds.submitFundingOtp);

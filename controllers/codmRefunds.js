@@ -173,17 +173,21 @@ const runAllRefunds = async (adminEmail) => {
 
 const CONFIRM_ALL = "CANCEL AND REFUND";
 
+const cancelEvent = async (adminEmail, reason) => {
+    await CodmEventState.updateOne(
+        { _id: "main", cancelledAt: null },
+        { $set: { cancelledAt: new Date(), cancelledBy: adminEmail, cancelReason: reason } },
+        { upsert: true }
+    ).catch((err) => { if (err.code !== 11000) throw err; }); // already cancelled: keep the first reason
+    clearPublicCache();
+};
+
 // POST /api/v1/codm/admin/refunds/all  { confirm: "CANCEL AND REFUND", reason }
 const refundAll = async (req, res) => {
     const b = req.body || {};
     if (b.confirm !== CONFIRM_ALL) throw new BadRequestError(`Type ${CONFIRM_ALL} to confirm.`);
     const reason = check.text(b.reason, "reason", { min: 3, max: 300 });
-    await CodmEventState.updateOne(
-        { _id: "main", cancelledAt: null },
-        { $set: { cancelledAt: new Date(), cancelledBy: req.player.email, cancelReason: reason } },
-        { upsert: true }
-    ).catch((err) => { if (err.code !== 11000) throw err; }); // already cancelled: keep the first reason
-    clearPublicCache();
+    await cancelEvent(req.player.email, reason);
     runAllRefunds(req.player.email).catch((err) => console.error("[codm] refund run failed:", err.message));
     res.status(StatusCodes.ACCEPTED).json(await buildRefunds());
 };
@@ -277,6 +281,62 @@ const listRefunds = async (req, res) => {
 const PROVIDER = { MTN: "mtn", Telecel: "vod", AirtelTigo: "atl" };
 const localPhone = (phone) => { const d = String(phone || "").replace(/[^\d]/g, ""); return d.startsWith("233") ? `0${d.slice(3)}` : d; };
 
+const FUND_REF = /^codmfund(?:_[a-f0-9]{24}|all)_\d{10,16}$/;
+
+// Starts the MoMo charge on the organiser's phone for a funding row.
+const startFundingCharge = async ({ reference, amount, phone, network, email, metadata }) => {
+    let data;
+    try {
+        ({ data } = await paystack().post("/charge", {
+            email, amount, currency: "GHS", reference,
+            mobile_money: { phone, provider: PROVIDER[network] },
+            metadata: { app: "codm", purpose: "refund-funding", ...metadata },
+        }));
+    } catch (err) {
+        const msg = String(err.response?.data?.message || err.message || "Paystack did not answer").slice(0, 300);
+        await CodmRefundFunding.updateOne({ reference }, { status: "failed", message: msg });
+        throw new BadRequestError(`Paystack couldn't start the MoMo payment: ${msg}`);
+    }
+    const ch = data.data || {};
+    if (ch.status === "success") return finishFunding(reference);
+    if (ch.status === "failed") {
+        await CodmRefundFunding.updateOne({ reference }, { status: "failed", message: ch.message || ch.gateway_response || "Declined" });
+        throw new BadRequestError(`The MoMo payment was declined: ${ch.message || ch.gateway_response || "no reason given"}`);
+    }
+    return {
+        reference, status: ch.status === "send_otp" ? "send_otp" : "pending",
+        amountGhs: amount / 100, phone, network,
+        displayText: ch.display_text || `Approve the GH₵${(amount / 100).toFixed(2)} prompt on ${phone} with your MoMo PIN.`,
+    };
+};
+
+const organiserMomo = (req) => {
+    const phone = localPhone((req.body || {}).phone ? check.phone(req.body.phone) : req.player.phone);
+    const network = detectNetwork(phone);
+    if (!network) throw new BadRequestError("Add your MoMo number to your account first (Edit on your row), then try again.");
+    return { phone, network };
+};
+
+// POST /api/v1/codm/admin/refunds/all/fund  { confirm: "CANCEL AND REFUND", reason, phone? }
+// One MoMo prompt for every online entry still to refund (GH₵50 each); once it is paid,
+// the tournament is cancelled and everyone is refunded (the same job as refunds/all).
+const fundRefundAll = async (req, res) => {
+    const b = req.body || {};
+    if (b.confirm !== CONFIRM_ALL) throw new BadRequestError(`Type ${CONFIRM_ALL} to confirm.`);
+    const state = await CodmEventState.findById("main").lean();
+    const reason = state?.cancelledAt ? state.cancelReason : check.text(b.reason, "reason", { min: 3, max: 300 });
+    const todo = await CodmPayment.find({ status: "success", reference: { $not: /^cash_/ }, ...claimable() }).lean();
+    if (!todo.length) throw new BadRequestError("There are no online payments left to refund.");
+    const open = await CodmRefundFunding.findOne({ kind: "all", status: "pending", createdAt: { $gt: new Date(Date.now() - 4 * 60 * 1000) } });
+    if (open) throw new BadRequestError("A MoMo prompt for refunding everyone is already waiting on your phone. Approve it, or wait 4 minutes and try again.");
+    const { phone, network } = organiserMomo(req);
+    const amount = todo.reduce((sum, p) => sum + entryPesewasOf(p), 0);
+    const reference = `codmfundall_${Date.now()}`;
+    await CodmRefundFunding.create({ reference, kind: "all", amountPesewas: amount, phone, adminEmail: req.player.email, reason });
+    const out = await startFundingCharge({ reference, amount, phone, network, email: req.player.email, metadata: { scope: "all", count: todo.length } });
+    res.status(StatusCodes.OK).json({ ...out, count: todo.length });
+};
+
 // POST /api/v1/codm/admin/players/:playerId/refund/fund  { phone? }
 const fundRefund = async (req, res) => {
     const playerId = check.objectId(req.params.playerId, "player");
@@ -287,46 +347,17 @@ const fundRefund = async (req, res) => {
     const open = await CodmRefundFunding.findOne({ paymentId: payment._id, status: "pending", createdAt: { $gt: new Date(Date.now() - 4 * 60 * 1000) } });
     if (open) throw new BadRequestError("A MoMo prompt for this refund is already waiting on your phone. Approve it, or wait 4 minutes and try again.");
 
-    const phone = localPhone((req.body || {}).phone ? check.phone(req.body.phone) : req.player.phone);
-    const network = detectNetwork(phone);
-    if (!network) throw new BadRequestError("Add your MoMo number to your account first (Edit on your row), then try again.");
-    const entry = entryPesewasOf(payment);
-    const amount = entry; // the organiser pays exactly the entry (GH₵50); Paystack's fee on it comes out of what lands
+    const { phone, network } = organiserMomo(req);
+    const amount = entryPesewasOf(payment); // exactly the entry (GH₵50); Paystack's fee on it comes out of what lands
     const reference = `codmfund_${payment._id}_${Date.now()}`;
     await CodmRefundFunding.create({ reference, paymentId: payment._id, playerId: player._id, amountPesewas: amount, phone, adminEmail: req.player.email });
-
-    let data;
-    try {
-        ({ data } = await paystack().post("/charge", {
-            email: req.player.email,
-            amount,
-            currency: "GHS",
-            reference,
-            mobile_money: { phone, provider: PROVIDER[network] },
-            metadata: { app: "codm", purpose: "refund-funding", paymentId: String(payment._id), playerId: String(player._id) },
-        }));
-    } catch (err) {
-        const msg = String(err.response?.data?.message || err.message || "Paystack did not answer").slice(0, 300);
-        await CodmRefundFunding.updateOne({ reference }, { status: "failed", message: msg });
-        throw new BadRequestError(`Paystack couldn't start the MoMo payment: ${msg}`);
-    }
-    const ch = data.data || {};
-    if (ch.status === "success") return res.json(await finishFunding(reference));
-    if (ch.status === "failed") {
-        await CodmRefundFunding.updateOne({ reference }, { status: "failed", message: ch.message || ch.gateway_response || "Declined" });
-        throw new BadRequestError(`The MoMo payment was declined: ${ch.message || ch.gateway_response || "no reason given"}`);
-    }
-    res.status(StatusCodes.OK).json({
-        reference, status: ch.status === "send_otp" ? "send_otp" : "pending",
-        amountGhs: amount / 100, phone, network,
-        displayText: ch.display_text || `Approve the GH₵${(amount / 100).toFixed(2)} prompt on ${phone} with your MoMo PIN.`,
-    });
+    res.status(StatusCodes.OK).json(await startFundingCharge({ reference, amount, phone, network, email: req.player.email, metadata: { paymentId: String(payment._id), playerId: String(player._id) } }));
 };
 
 // POST /api/v1/codm/admin/refunds/fund/:reference/otp  { otp }  (some networks send an OTP first)
 const submitFundingOtp = async (req, res) => {
     const reference = String(req.params.reference || "");
-    if (!/^codmfund_[a-f0-9]{24}_\d{10,16}$/.test(reference)) throw new BadRequestError("Unknown payment.");
+    if (!FUND_REF.test(reference)) throw new BadRequestError("Unknown payment.");
     const otp = String((req.body || {}).otp || "").trim();
     if (!/^\d{4,8}$/.test(otp)) throw new BadRequestError("Enter the code sent to your phone.");
     try {
@@ -357,9 +388,15 @@ const finishFunding = async (reference) => {
     if (row.status === "failed") return { reference, status: "failed", message: row.message || "The MoMo payment didn't go through." };
     if (row.status === "pending") return { reference, status: "pending" };
 
-    // Paid in. Request the refund once.
+    // Paid in. Request the refund(s) once.
     const claim = await CodmRefundFunding.findOneAndUpdate({ _id: row._id, refundStarted: false }, { refundStarted: true }, { new: true });
-    if (!claim) return { reference, status: "success", refund: row.refundResult || "already requested" };
+    if (!claim) return { reference, status: "success", refund: row.refundResult || "already requested", message: "Your MoMo payment went through and the refunds were already started." };
+    if (row.kind === "all") {
+        await cancelEvent(row.adminEmail, row.reason);
+        runAllRefunds(row.adminEmail).catch((err) => console.error("[codm] refund run failed:", err.message));
+        await CodmRefundFunding.updateOne({ _id: row._id }, { refundResult: "all started" });
+        return { reference, status: "success", refunded: true, all: true, message: `Your GH₵${(row.amountPesewas / 100).toFixed(2)} MoMo payment went through. The tournament is cancelled and every player's GH₵50 refund is being sent now; the list updates as they go.` };
+    }
     let out;
     try {
         out = await refundOnePlayer(row.playerId, row.adminEmail);
@@ -374,8 +411,8 @@ const finishFunding = async (reference) => {
 // GET /api/v1/codm/admin/refunds/fund/:reference
 const fundingStatus = async (req, res) => {
     const reference = String(req.params.reference || "");
-    if (!/^codmfund_[a-f0-9]{24}_\d{10,16}$/.test(reference)) throw new BadRequestError("Unknown payment.");
+    if (!FUND_REF.test(reference)) throw new BadRequestError("Unknown payment.");
     res.json(await finishFunding(reference));
 };
 
-module.exports = { refundPlayer, refundAll, listRefunds, fundRefund, submitFundingOtp, fundingStatus };
+module.exports = { refundPlayer, refundAll, listRefunds, fundRefund, fundRefundAll, submitFundingOtp, fundingStatus };

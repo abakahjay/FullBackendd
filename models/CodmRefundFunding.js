@@ -6,8 +6,11 @@ const mongoose = require("mongoose");
 const CodmRefundFundingSchema = new mongoose.Schema(
     {
         reference: { type: String, required: true, unique: true },
-        paymentId: { type: mongoose.Schema.Types.ObjectId, ref: "CodmPayment", required: true, index: true },
-        playerId: { type: mongoose.Schema.Types.ObjectId, ref: "CodmPlayer", required: true },
+        // "one": fund one player's refund. "all": fund cancel-and-refund-everyone.
+        kind: { type: String, enum: ["one", "all"], default: "one" },
+        paymentId: { type: mongoose.Schema.Types.ObjectId, ref: "CodmPayment", default: null, index: true },
+        playerId: { type: mongoose.Schema.Types.ObjectId, ref: "CodmPlayer", default: null },
+        reason: { type: String, default: null }, // "all": the cancellation reason players will see
         amountPesewas: { type: Number, required: true },
         phone: { type: String, required: true },
         adminEmail: { type: String, required: true },
