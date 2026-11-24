@@ -469,7 +469,7 @@ fee through Paystack. A team is **confirmed** when it has 5 members and all 5 ha
 - Paystack: the amount is `CODM_ENTRY_FEE_GHS` plus Paystack's fee when `CODM_PASS_FEES` is on (default): `feeBreakdown()` in
   `utils/codm.js`, Paystack's formula price / (1 − `CODM_PAYSTACK_FEE_PERCENT`, 1.95), rounded up to the pesewa (GH₵50 → GH₵51.00).
   `/event` exposes `processingFeeGhs`/`totalChargeGhs`. `CodmPayment.entryPesewas` is the entry part (`entryPesewasOf()` for older rows);
-  admin totals and refund rows count entries (GH₵50), and refunds return the full charge. The paid check also accepts `requested_amount`. Cash payments
+  admin totals, refund rows and refunds use the entry (GH₵50); Paystack keeps its fee. The paid check also accepts `requested_amount`. Cash payments
   recorded by admins stay at the entry fee; `callbackUrl` must pass `isAllowedCodmRedirect`
   (`ALLOWED_REDIRECT_DOMAINS` or the origin of `CODM_CLIENT_URL`). A player is marked paid only by
   `applySuccessfulCharge()` after amount, currency, `metadata.app === "codm"` and `metadata.playerId` match, from

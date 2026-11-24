@@ -23,7 +23,8 @@ const { BadRequestError, NotFoundError } = require("../errors");
 //   organiser to hand back and record one by one.
 // - Status:      GET /admin/refunds   (also refreshes pending ones from Paystack)
 //
-// Paystack keeps its processing fee on a refund, and a Starter Business has no
+// Refunds return the entry fee only (amount: entryPesewasOf), since Paystack keeps its
+// processing fee anyway. A Starter Business has no
 // balance: refunds come out of payouts Paystack has not sent yet. Paystack's own
 // error (e.g. not enough pending payout) is stored in refundError and shown.
 //
@@ -72,17 +73,20 @@ const refundOnline = async (paymentId, adminEmail, note) => {
     if (!payment) return null;
     let update;
     try {
+        // Refund the entry fee only (GH₵50). Paystack keeps its processing fee on a
+        // refund anyway, so the GH₵1 the player paid on top is already gone.
         const { data } = await paystack().post("/refund", {
             transaction: payment.reference,
+            amount: entryPesewasOf(payment),
             customer_note: note.customer,
             merchant_note: `${note.merchant} (by ${adminEmail})`,
         });
         const r = data.data || {};
-        update = { refundStatus: DONE.includes(r.status) ? r.status : "pending", refundId: r.id ?? null, refundAmountPesewas: r.amount ?? payment.amountPesewas };
+        update = { refundStatus: DONE.includes(r.status) ? r.status : "pending", refundId: r.id ?? null, refundAmountPesewas: r.amount ?? entryPesewasOf(payment) };
     } catch (err) {
         const msg = String(err.response?.data?.message || err.message || "Paystack did not answer").slice(0, 300);
         update = /fully (reversed|refunded)|already been (reversed|refunded)/i.test(msg)
-            ? { refundStatus: "processed", refundAmountPesewas: payment.amountPesewas, refundError: null }
+            ? { refundStatus: "processed", refundAmountPesewas: entryPesewasOf(payment), refundError: null }
             : { refundStatus: "failed", refundError: msg };
         if (update.refundStatus === "failed") console.warn(`[codm] refund failed for ${payment.reference}: ${msg}`);
     }
@@ -177,7 +181,7 @@ const toRow = (p, player) => ({
     method: isCash(p.reference) ? "cash" : "paystack",
     channel: p.channel,
     amountGhs: entryPesewasOf(p) / 100, // the entry fee
-    chargedGhs: p.amountPesewas / 100, // what the player paid, Paystack fee included (what a refund returns)
+    chargedGhs: p.amountPesewas / 100, // what the player paid, Paystack fee included (a refund returns only the entry)
     paidAt: p.paidAt,
     refundStatus: p.refundStatus,
     refundAmountGhs: p.refundAmountPesewas ? p.refundAmountPesewas / 100 : null,
