@@ -4,9 +4,11 @@ const CodmTeam = require("../models/CodmTeam.js");
 const CodmPayment = require("../models/CodmPayment.js");
 const CodmBracket = require("../models/CodmBracket.js");
 const CodmEventState = require("../models/CodmEventState.js");
+const CodmRefundFunding = require("../models/CodmRefundFunding.js");
+const { detectNetwork } = require("../utils/ghana.js");
 const { paystack } = require("./codmPayments.js");
 const { removeFromTeam } = require("./codmTeams.js");
-const { check, clearPublicCache, entryPesewasOf } = require("../utils/codm.js");
+const { check, clearPublicCache, entryPesewasOf, eventConfig } = require("../utils/codm.js");
 const { BadRequestError, NotFoundError } = require("../errors");
 
 // Refunds for the CODM entry fee (admin only).
@@ -101,6 +103,14 @@ const isCancelled = async () => !!(await CodmEventState.exists({ _id: "main", ca
 const refundPlayer = async (req, res) => {
     const playerId = check.objectId(req.params.playerId, "player");
     if ((req.body || {}).confirm !== true) throw new BadRequestError("Confirm the refund first.");
+    const out = await refundOnePlayer(playerId, req.player.email);
+    res.status(StatusCodes.OK).json(out);
+};
+
+// Refunds one player and returns { refund, message }; throws BadRequestError when it can't.
+// A Paystack refusal is thrown with `needsFunding: true` so the admin page can offer
+// to fund it from the organiser's MoMo.
+const refundOnePlayer = async (playerId, adminEmail) => {
     const player = await CodmPlayer.findById(playerId);
     if (!player) throw new NotFoundError("Player not found");
     if (!player.paid || !player.paymentReference) throw new BadRequestError(`${player.ign} has no entry payment to refund.`);
@@ -114,22 +124,26 @@ const refundPlayer = async (req, res) => {
     if (isCash(payment.reference)) {
         const claimed = await CodmPayment.findOneAndUpdate(
             { _id: payment._id, ...claimable() },
-            { $set: { refundStatus: "manual", refundAmountPesewas: payment.amountPesewas, refundRequestedAt: new Date(), refundRequestedBy: req.player.email, refundUpdatedAt: new Date(), refundError: null } },
+            { $set: { refundStatus: "manual", refundAmountPesewas: payment.amountPesewas, refundRequestedAt: new Date(), refundRequestedBy: adminEmail, refundUpdatedAt: new Date(), refundError: null } },
             { new: true }
         );
         if (!claimed) throw new BadRequestError("This payment is already being refunded.");
         await unpayPlayer(claimed, { leaveTeam: !cancelled });
-        return res.status(StatusCodes.OK).json({ refund: toRow(claimed, player), message: `Recorded: hand GH₵${(payment.amountPesewas / 100).toFixed(2)} cash back to ${player.fullName}.` });
+        return { refund: toRow(claimed, player), message: `Recorded: hand GH₵${(payment.amountPesewas / 100).toFixed(2)} cash back to ${player.fullName}.` };
     }
 
-    const result = await refundOnline(payment._id, req.player.email, {
+    const result = await refundOnline(payment._id, adminEmail, {
         customer: "Refund of your CODM Campus Showdown entry fee.",
         merchant: `CODM refund for ${player.ign} (${player.codmUid})`,
     });
     if (!result) throw new BadRequestError("This payment is already being refunded.");
-    if (result.refundStatus === "failed") throw new BadRequestError(`Paystack refused the refund: ${result.refundError}`);
+    if (result.refundStatus === "failed") {
+        const err = new BadRequestError(`Paystack refused the refund: ${result.refundError}`);
+        err.needsFunding = true;
+        throw err;
+    }
     await unpayPlayer(result, { leaveTeam: !cancelled });
-    res.status(StatusCodes.OK).json({ refund: toRow(result, player), message: `Refund of GH₵${(result.refundAmountPesewas / 100).toFixed(2)} sent to Paystack for ${player.fullName}. It reaches them in 3 to 10 working days.` });
+    return { refund: toRow(result, player), message: `Refund of GH₵${(result.refundAmountPesewas / 100).toFixed(2)} sent to Paystack for ${player.fullName}. It reaches them in 3 to 10 working days.` };
 };
 
 // ---------------------------------------------------------------------------
@@ -250,4 +264,117 @@ const listRefunds = async (req, res) => {
     res.status(StatusCodes.OK).json(await buildRefunds());
 };
 
-module.exports = { refundPlayer, refundAll, listRefunds };
+// ---------------------------------------------------------------------------
+// Funding a refund from the organiser's MoMo.
+//
+// A Starter Business has no Paystack balance: refunds come out of payouts not yet
+// sent. When there are none, the organiser pays the entry back into Paystack with a
+// MoMo prompt on their own phone (they type their PIN there; nothing here sees it),
+// and once Paystack confirms that charge the player's refund is requested.
+// The charge is the entry grossed up by Paystack's fee (GH₵50 -> GH₵51), so what
+// lands in Paystack covers the GH₵50 refund.
+const PROVIDER = { MTN: "mtn", Telecel: "vod", AirtelTigo: "atl" };
+const localPhone = (phone) => { const d = String(phone || "").replace(/[^\d]/g, ""); return d.startsWith("233") ? `0${d.slice(3)}` : d; };
+
+// POST /api/v1/codm/admin/players/:playerId/refund/fund  { phone? }
+const fundRefund = async (req, res) => {
+    const playerId = check.objectId(req.params.playerId, "player");
+    const player = await CodmPlayer.findById(playerId);
+    if (!player || !player.paid || !player.paymentReference || isCash(player.paymentReference)) throw new BadRequestError("This player has no online payment to refund.");
+    const payment = await CodmPayment.findOne({ reference: player.paymentReference, status: "success", ...claimable() });
+    if (!payment) throw new BadRequestError("This payment is already refunded or being refunded.");
+    const open = await CodmRefundFunding.findOne({ paymentId: payment._id, status: "pending", createdAt: { $gt: new Date(Date.now() - 4 * 60 * 1000) } });
+    if (open) throw new BadRequestError("A MoMo prompt for this refund is already waiting on your phone. Approve it, or wait 4 minutes and try again.");
+
+    const phone = localPhone((req.body || {}).phone ? check.phone(req.body.phone) : req.player.phone);
+    const network = detectNetwork(phone);
+    if (!network) throw new BadRequestError("Add your MoMo number to your account first (Edit on your row), then try again.");
+    const entry = entryPesewasOf(payment);
+    const amount = Math.ceil(entry / (1 - eventConfig().feePercent / 100));
+    const reference = `codmfund_${payment._id}_${Date.now()}`;
+    await CodmRefundFunding.create({ reference, paymentId: payment._id, playerId: player._id, amountPesewas: amount, phone, adminEmail: req.player.email });
+
+    let data;
+    try {
+        ({ data } = await paystack().post("/charge", {
+            email: req.player.email,
+            amount,
+            currency: "GHS",
+            reference,
+            mobile_money: { phone, provider: PROVIDER[network] },
+            metadata: { app: "codm", purpose: "refund-funding", paymentId: String(payment._id), playerId: String(player._id) },
+        }));
+    } catch (err) {
+        const msg = String(err.response?.data?.message || err.message || "Paystack did not answer").slice(0, 300);
+        await CodmRefundFunding.updateOne({ reference }, { status: "failed", message: msg });
+        throw new BadRequestError(`Paystack couldn't start the MoMo payment: ${msg}`);
+    }
+    const ch = data.data || {};
+    if (ch.status === "success") return res.json(await finishFunding(reference));
+    if (ch.status === "failed") {
+        await CodmRefundFunding.updateOne({ reference }, { status: "failed", message: ch.message || ch.gateway_response || "Declined" });
+        throw new BadRequestError(`The MoMo payment was declined: ${ch.message || ch.gateway_response || "no reason given"}`);
+    }
+    res.status(StatusCodes.OK).json({
+        reference, status: ch.status === "send_otp" ? "send_otp" : "pending",
+        amountGhs: amount / 100, phone, network,
+        displayText: ch.display_text || `Approve the GH₵${(amount / 100).toFixed(2)} prompt on ${phone} with your MoMo PIN.`,
+    });
+};
+
+// POST /api/v1/codm/admin/refunds/fund/:reference/otp  { otp }  (some networks send an OTP first)
+const submitFundingOtp = async (req, res) => {
+    const reference = String(req.params.reference || "");
+    if (!/^codmfund_[a-f0-9]{24}_\d{10,16}$/.test(reference)) throw new BadRequestError("Unknown payment.");
+    const otp = String((req.body || {}).otp || "").trim();
+    if (!/^\d{4,8}$/.test(otp)) throw new BadRequestError("Enter the code sent to your phone.");
+    try {
+        const { data } = await paystack().post("/charge/submit_otp", { otp, reference });
+        const ch = data.data || {};
+        res.json({ reference, status: ch.status === "success" ? "success" : "pending", displayText: ch.display_text || "Now approve the prompt on your phone." });
+    } catch (err) {
+        throw new BadRequestError(`Paystack didn't accept the code: ${String(err.response?.data?.message || err.message).slice(0, 200)}`);
+    }
+};
+
+// Checks the funding charge and, once it has succeeded, requests the player's refund (once).
+const finishFunding = async (reference) => {
+    const row = await CodmRefundFunding.findOne({ reference });
+    if (!row) throw new NotFoundError("Unknown payment.");
+    if (row.status === "pending") {
+        let tx = {};
+        try { ({ data: { data: tx = {} } } = await paystack().get(`/transaction/verify/${encodeURIComponent(reference)}`)); } catch { /* still waiting */ }
+        if (tx.status === "success" && tx.amount === row.amountPesewas && tx.currency === "GHS" && tx.metadata?.purpose === "refund-funding") {
+            await CodmRefundFunding.updateOne({ _id: row._id, status: "pending" }, { status: "success", message: null });
+            row.status = "success";
+        } else if (["failed", "abandoned", "reversed"].includes(tx.status) && Date.now() - row.createdAt > 3 * 60 * 1000) {
+            await CodmRefundFunding.updateOne({ _id: row._id, status: "pending" }, { status: "failed", message: tx.gateway_response || tx.message || tx.status });
+            row.status = "failed";
+            row.message = tx.gateway_response || tx.message || tx.status;
+        }
+    }
+    if (row.status === "failed") return { reference, status: "failed", message: row.message || "The MoMo payment didn't go through." };
+    if (row.status === "pending") return { reference, status: "pending" };
+
+    // Paid in. Request the refund once.
+    const claim = await CodmRefundFunding.findOneAndUpdate({ _id: row._id, refundStarted: false }, { refundStarted: true }, { new: true });
+    if (!claim) return { reference, status: "success", refund: row.refundResult || "already requested" };
+    let out;
+    try {
+        out = await refundOnePlayer(row.playerId, row.adminEmail);
+        await CodmRefundFunding.updateOne({ _id: row._id }, { refundResult: "requested" });
+        return { reference, status: "success", refunded: true, message: `Your MoMo payment went through. ${out.message}`, refund: out.refund };
+    } catch (err) {
+        await CodmRefundFunding.updateOne({ _id: row._id }, { refundResult: `failed: ${err.message}` });
+        return { reference, status: "success", refunded: false, message: `Your MoMo payment went through, but the refund still failed: ${err.message}. The money is in Paystack; try Refund again in a few minutes.` };
+    }
+};
+
+// GET /api/v1/codm/admin/refunds/fund/:reference
+const fundingStatus = async (req, res) => {
+    const reference = String(req.params.reference || "");
+    if (!/^codmfund_[a-f0-9]{24}_\d{10,16}$/.test(reference)) throw new BadRequestError("Unknown payment.");
+    res.json(await finishFunding(reference));
+};
+
+module.exports = { refundPlayer, refundAll, listRefunds, fundRefund, submitFundingOtp, fundingStatus };

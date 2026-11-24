@@ -123,5 +123,8 @@ router.delete("/admin/bracket", codmAuth, requireCodmAdmin, bracket.resetBracket
 router.get("/admin/refunds", codmAuth, requireCodmAdmin, refunds.listRefunds);
 router.post("/admin/refunds/all", codmAuth, requireCodmAdmin, paymentLimiter, refunds.refundAll);
 router.post("/admin/players/:playerId/refund", codmAuth, requireCodmAdmin, paymentLimiter, refunds.refundPlayer);
+router.post("/admin/players/:playerId/refund/fund", codmAuth, requireCodmAdmin, paymentLimiter, refunds.fundRefund);
+router.post("/admin/refunds/fund/:reference/otp", codmAuth, requireCodmAdmin, paymentLimiter, refunds.submitFundingOtp);
+router.get("/admin/refunds/fund/:reference", codmAuth, requireCodmAdmin, refunds.fundingStatus);
 
 module.exports = router;
