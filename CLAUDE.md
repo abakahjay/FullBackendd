@@ -513,7 +513,7 @@ fee through Paystack. A team is **confirmed** when it has 5 members and all 5 ha
   called, so nothing is refunded twice; a "fully reversed" answer counts as processed. `applySuccessfulCharge` ignores
   refunded payments. Paystack keeps its fee on refunds, and a Starter Business's refunds come from pending payouts, so a
   refund can fail with Paystack's balance message (`refundError`). The organiser can then fund it from their own MoMo:
-  `POST /admin/players/:id/refund/fund { phone? }` charges the entry grossed up by the fee (GH₵51) through Paystack's
+  `POST /admin/players/:id/refund/fund { phone? }` charges exactly the entry (GH₵50, organiser's choice; ~GH₵49.02 lands after Paystack's fee) through Paystack's
   Charge API (`mobile_money`, provider from `detectNetwork`; the PIN is typed on the phone), `POST /admin/refunds/fund/:ref/otp`
   submits an OTP if the network asks, and `GET /admin/refunds/fund/:ref` verifies the charge and then runs the refund once
   (`models/CodmRefundFunding.js`, `refundStarted` claimed atomically). References are `codmfund_<paymentId>_<ms>`.

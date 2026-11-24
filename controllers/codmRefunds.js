@@ -271,8 +271,9 @@ const listRefunds = async (req, res) => {
 // sent. When there are none, the organiser pays the entry back into Paystack with a
 // MoMo prompt on their own phone (they type their PIN there; nothing here sees it),
 // and once Paystack confirms that charge the player's refund is requested.
-// The charge is the entry grossed up by Paystack's fee (GH₵50 -> GH₵51), so what
-// lands in Paystack covers the GH₵50 refund.
+// The charge is exactly the entry (GH₵50), as the organiser chose. Paystack takes its
+// 1.95% from it, so about GH₵49.02 lands; the refund of GH₵50 can still be refused if
+// nothing else is waiting to be paid out, and the page then says so.
 const PROVIDER = { MTN: "mtn", Telecel: "vod", AirtelTigo: "atl" };
 const localPhone = (phone) => { const d = String(phone || "").replace(/[^\d]/g, ""); return d.startsWith("233") ? `0${d.slice(3)}` : d; };
 
@@ -290,7 +291,7 @@ const fundRefund = async (req, res) => {
     const network = detectNetwork(phone);
     if (!network) throw new BadRequestError("Add your MoMo number to your account first (Edit on your row), then try again.");
     const entry = entryPesewasOf(payment);
-    const amount = Math.ceil(entry / (1 - eventConfig().feePercent / 100));
+    const amount = entry; // the organiser pays exactly the entry (GH₵50); Paystack's fee on it comes out of what lands
     const reference = `codmfund_${payment._id}_${Date.now()}`;
     await CodmRefundFunding.create({ reference, paymentId: payment._id, playerId: player._id, amountPesewas: amount, phone, adminEmail: req.player.email });
 
