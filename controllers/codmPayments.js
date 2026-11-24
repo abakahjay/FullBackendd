@@ -83,7 +83,7 @@ const initializePayment = async (req, res) => {
     const cfg = eventConfig();
     const amount = cfg.totalChargePesewas; // entry fee + Paystack fee (see feeBreakdown in utils/codm.js)
     const reference = `codm_${player._id}_${Date.now()}${crypto.randomBytes(3).toString("hex")}`;
-    await CodmPayment.create({ reference, playerId: player._id, amountPesewas: amount });
+    await CodmPayment.create({ reference, playerId: player._id, amountPesewas: amount, entryPesewas: Math.round(cfg.entryFeeGhs * 100) });
 
     let response;
     try {

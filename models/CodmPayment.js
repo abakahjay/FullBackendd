@@ -7,7 +7,8 @@ const CodmPaymentSchema = new mongoose.Schema(
     {
         reference: { type: String, required: true, unique: true },
         playerId: { type: mongoose.Schema.Types.ObjectId, ref: "CodmPlayer", required: true, index: true },
-        amountPesewas: { type: Number, required: true },
+        amountPesewas: { type: Number, required: true }, // what the player was charged (entry + Paystack fee)
+        entryPesewas: { type: Number, default: null }, // the entry fee part; null on rows made before it was stored
         currency: { type: String, default: "GHS" },
         status: { type: String, enum: ["pending", "success", "failed"], default: "pending" },
         channel: { type: String, default: null },

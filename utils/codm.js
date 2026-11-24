@@ -20,6 +20,16 @@ const feeBreakdown = (entryFeeGhs, passFees, feePercent) => {
     return { processingFeeGhs: (total - entry) / 100, totalChargeGhs: total / 100, totalChargePesewas: total };
 };
 
+// The entry-fee part of a payment, which is what the organiser counts as collected.
+// The rest of a Paystack charge is Paystack's processing fee. Rows made before
+// entryPesewas was stored: a charge equal to the fee-inclusive price is one entry.
+const entryPesewasOf = (payment) => {
+    if (payment.entryPesewas != null) return payment.entryPesewas;
+    const cfg = eventConfig();
+    const entry = Math.round(cfg.entryFeeGhs * 100);
+    return payment.amountPesewas === cfg.totalChargePesewas ? entry : payment.amountPesewas;
+};
+
 const eventConfig = () => {
     const cfg = baseConfig();
     return { ...cfg, ...feeBreakdown(cfg.entryFeeGhs, cfg.passFees, cfg.feePercent) };
@@ -178,7 +188,7 @@ const PUBLIC_CACHE_MS = Number(process.env.CODM_PUBLIC_CACHE_MS) || 4000;
 
 module.exports = {
     cachedPublic, clearPublicCache, PUBLIC_CACHE_MS,
-    eventConfig, registrationOpen, pesewas,
+    eventConfig, registrationOpen, pesewas, entryPesewasOf,
     check: { text, email, password, phone, ign, codmUid, teamName, teamTag, inviteCode, objectId },
     newInviteCode, isAllowedCodmRedirect,
     toPlayerDTO, toMemberDTO, teamStatus, maskPhone,

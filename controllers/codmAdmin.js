@@ -2,7 +2,7 @@ const { StatusCodes } = require("http-status-codes");
 const CodmPlayer = require("../models/CodmPlayer.js");
 const CodmTeam = require("../models/CodmTeam.js");
 const CodmPayment = require("../models/CodmPayment.js");
-const { eventConfig, teamStatus, pesewas, check } = require("../utils/codm.js");
+const { eventConfig, teamStatus, pesewas, check, entryPesewasOf } = require("../utils/codm.js");
 const { BadRequestError, NotFoundError } = require("../errors");
 
 const playerRow = (p, captainId) => ({
@@ -27,7 +27,7 @@ const buildOverview = async () => {
     const [teams, players, payments] = await Promise.all([
         CodmTeam.find().sort({ createdAt: 1 }).lean(),
         CodmPlayer.find({ isActive: true }).sort({ createdAt: 1 }).lean(),
-        CodmPayment.find({ status: "success" }).select("amountPesewas").lean(),
+        CodmPayment.find({ status: "success", refundStatus: null }).select("amountPesewas entryPesewas").lean(),
     ]);
     const byId = new Map(players.map((p) => [String(p._id), p]));
     const teamRows = teams.map((t) => {
@@ -42,7 +42,9 @@ const buildOverview = async () => {
             paidPlayers: players.filter((p) => p.paid).length,
             teams: teams.length,
             confirmedTeams: teamRows.filter((t) => t.confirmed).length,
-            collectedGhs: payments.reduce((s, p) => s + p.amountPesewas, 0) / 100,
+            // Entry fees only (GH₵50 each); Paystack's fee is what players paid on top.
+            collectedGhs: payments.reduce((s, p) => s + entryPesewasOf(p), 0) / 100,
+            paystackFeesGhs: payments.reduce((s, p) => s + p.amountPesewas - entryPesewasOf(p), 0) / 100,
         },
         teams: teamRows,
         playersWithoutTeam: noTeam,
@@ -84,7 +86,7 @@ const setPaid = async (req, res) => {
         const reference = `cash_${player._id}_${Date.now()}`;
         const wanted = (req.body || {}).channel;
         const channel = MANUAL_CHANNELS.includes(wanted) ? wanted : "Cash";
-        await CodmPayment.create({ reference, playerId: player._id, amountPesewas: pesewas(eventConfig().entryFeeGhs), status: "success", channel, paidAt: new Date() });
+        await CodmPayment.create({ reference, playerId: player._id, amountPesewas: pesewas(eventConfig().entryFeeGhs), entryPesewas: pesewas(eventConfig().entryFeeGhs), status: "success", channel, paidAt: new Date() });
         Object.assign(player, { paid: true, paidAt: new Date(), paymentReference: reference, paymentChannel: channel });
     } else if (!paid && player.paid) {
         if (!String(player.paymentReference || "").startsWith("cash_")) throw new BadRequestError("This player paid online with Paystack; refund it in Paystack instead.");

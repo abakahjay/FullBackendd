@@ -6,7 +6,7 @@ const CodmBracket = require("../models/CodmBracket.js");
 const CodmEventState = require("../models/CodmEventState.js");
 const { paystack } = require("./codmPayments.js");
 const { removeFromTeam } = require("./codmTeams.js");
-const { check, clearPublicCache } = require("../utils/codm.js");
+const { check, clearPublicCache, entryPesewasOf } = require("../utils/codm.js");
 const { BadRequestError, NotFoundError } = require("../errors");
 
 // Refunds for the CODM entry fee (admin only).
@@ -176,7 +176,8 @@ const toRow = (p, player) => ({
     reference: p.reference,
     method: isCash(p.reference) ? "cash" : "paystack",
     channel: p.channel,
-    amountGhs: p.amountPesewas / 100,
+    amountGhs: entryPesewasOf(p) / 100, // the entry fee
+    chargedGhs: p.amountPesewas / 100, // what the player paid, Paystack fee included (what a refund returns)
     paidAt: p.paidAt,
     refundStatus: p.refundStatus,
     refundAmountGhs: p.refundAmountPesewas ? p.refundAmountPesewas / 100 : null,
