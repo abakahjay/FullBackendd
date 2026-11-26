@@ -19,7 +19,7 @@ No local MongoDB? Use `mongodb-memory-server` from a folder outside this repo (s
 
 | # | Sev | Finding | Fix | Verified |
 |---|-----|---------|-----|----------|
-| 1 | 🔴 | **`GET /api/v1/posts` and `/posts/user/:id` leaked every poster's password hash, `tokens` (live login JWTs: anyone could sign in as them), reset fields and email.** Public, no login needed. | `models/User.js` `toJSON` drops `password`, `tokens`, `resetPassword*`, `verificationToken` from every JSON response. Post populates select public fields only (`POST_USER_FIELDS`, also hides email and phone, as `getAllUsers` already did). | ✅ `data leak` |
+| 1 | 🔴 | **`GET /api/v1/posts/user/:id` leaked the full user record of everyone who liked those posts: password hash, saved login tokens, reset tokens, email, phone.** Public, no login needed. **Confirmed on the live site 2026-11-26.** (`GET /api/v1/posts` itself didn't leak: `populate('user')` names a field the schema doesn't have.) | `models/User.js` `toJSON` drops `password`, `tokens`, `resetPassword*`, `verificationToken` from every JSON response; post populates select public fields only (`POST_USER_FIELDS`, also hides email/phone). **After deploying, rotate `JWT_SECRET`**: tokens that leaked stay valid until then. | ✅ `data leak` |
 | 2 | 🔴 | **Stored XSS on the admin dashboard.** The public AFA sign-up stores `fullname` etc., and `static/afrodata.html` rendered them with `innerHTML` and inside an `onclick`. MTN order fields had the same issue on `dashboard.html`. | `esc()` helper in both pages; every server value is escaped. The edit and order-again buttons pass data through `data-*` + `JSON.parse` instead of building JS strings. | ✅ payload stored as text (`IDOR: AFA`); page code reviewed |
 | 3 | 🔴 | **Cart/Orders IDOR.** Anyone could list every cart/order, and read, change or delete any of them by id. | `optionalAuth` + ownership (`utils/shop.js`). A cart/order with `createdBy` is visible only to its owner or an admin (404 otherwise). The Amazon demo's anonymous shared cart still works without a login. Listing every cart, creating and deleting carts need a login; editing/deleting orders is admin-only. | ✅ `IDOR: shop` |
 | 4 | 🔴 | **AFA registrations (ID numbers, phones) and MTN data orders were world-readable and editable.** | `authMiddleware, adminOnly` on list/update/delete (the admin dashboard sends the `token` cookie). `GET /ordersdata/:email` returns only your own email's orders unless you are an admin. A non-admin creating an MTN order can't set `status` or `payment`. Update bodies are whitelisted. AFA sign-ups are no longer printed to the log. | ✅ `IDOR: AFA` |
@@ -38,6 +38,38 @@ No local MongoDB? Use `mongodb-memory-server` from a folder outside this repo (s
 Also verified by attack test, no change needed: forged/unsigned Paystack webhooks (SeedBridge, CODM) are rejected; sign-up with `"role":"admin"` gives `user`; the login limiter answers 429; a 60 MB body gets 413 and the server stays up; malformed JSON has no stack trace; a foreign `Origin` gets no `Allow-Credentials`; `/.env`, `/.git/config`, `/app.js`, `/package.json` are not served.
 
 **Payment failure paths (CODM webhook, `test/security/payments.test.js`)**, all ✅: wrong signature; declined charge; wrong amount, currency, player or app; duplicate and late webhooks (idempotent, `paidAt` unchanged); paying twice keeps the first reference; a refunded checkout never re-pays; unknown reference ignored; malformed JSON gives 400.
+
+## Live check of the Render sites (2026-11-26, read-only)
+
+Done against production **before** this branch was pushed, so it shows what is open right now. Nothing was written, no logins were attempted, and personal data was counted, never printed.
+
+- Backend: helmet headers, HSTS and rate-limit headers present; `/.env`, `/.git` and the source are not served; no stack traces; forged JWTs (`alg:none`, garbage) are rejected; a foreign Origin gets no credentials.
+- **Open on live, fixed in `main`:** `/posts/user/:id` secrets leak (row 1); anonymous `GET` on `/cart`, `/orders`, `/afa/registrations`, `/ordersdata`, `/foodorders/all`, `/foodorders/total`. `/orders` also returned old SeedBridge-era records (buyer names, delivery addresses, Paystack references) stored in the same collection; non-admins now only see shop orders (those with `orderTime`).
+- Frontends (13 checked): all answer 200 except `ghanacropguard.onrender.com` (404, an old service: delete it on Render). No API keys found in any JS bundle. CORS preflights from Nsoro, GH-GPT, CleanBridge, CropGuard, portfolio, finance tracker and BillNova all pass. JayRouter's bundle still contains `http://localhost:8080`, and `seedbridge-blueprint` calls `openlabs-project-2` (the old backend copy), not FullBackendd. Check both.
+- Free-plan cold start: the first request took 54 s. Use an uptime monitor on `/healthz` (that also keeps it warm) or a paid instance.
+
+## CropGuard model accuracy (independent check)
+
+`node scripts/cropguardEvaluate.js ../ghanacropguard-ai/ml/data --out report.json` runs the bundle the server serves (`mobilenetv3_large_100-1.1.0`) through the production `Classifier.predict()` on the 3,615 held-out test photos, which were never used for training or model selection.
+
+| Metric | Result |
+|---|---|
+| Accuracy | **88.9%** (95% CI 87.8–89.9%); model card says 89.1% (agrees) |
+| Top-3 accuracy | 99.0% (the right answer is almost always in the 3 shown) |
+| Macro precision / recall (sensitivity) / specificity / F1 | 87.7% / 89.1% / 99.5% / 88.1% |
+| Wrong crop | 0.2% |
+| Calibration (ECE) | 0.082 (confidence is slightly over-stated) |
+| Leaf check | 99.3% of real leaves accepted; **100% of 600** non-leaf photos (Imagenette) refused |
+| Latency | p50 16 ms, p95 24 ms per photo on CPU |
+
+Strong (F1 ≥ 92%): every cashew and cassava class except cassava brown spot (F1 91.9%), plus maize streak virus, fall armyworm, leaf beetle and grasshopper. **Weak:**
+- tomato leaf curl (F1 62%)
+- tomato verticillium wilt (F1 63%, recall 57%)
+- tomato leaf blight (F1 68%)
+- tomato septoria (F1 75%)
+- maize healthy (precision 62%: maize leaf spot is called healthy 17 times out of 154, a missed disease)
+
+Averaging the prediction with a flipped copy (TTA) only adds +0.5 pt, within noise, so it isn't used. To improve the weak classes: retrain on a GPU with a larger backbone (EfficientNet-B0/ConvNeXt-Tiny were benchmarked but never trained), add more and cleaner tomato and maize-leaf-spot photos (CCMT's tomato labels are known to be noisy), and keep the "preliminary assessment, not a diagnosis" wording plus the top-3 list, which is right 99% of the time.
 
 ## Needs your decision
 

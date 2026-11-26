@@ -3,19 +3,31 @@ const { StatusCodes } = require('http-status-codes');
 const dayJs = require('dayjs');
 const Orders = require('../models/Orders');
 const Delivery = require('../models/Delivery');
-const { BadRequestError } = require('../errors');
+const { BadRequestError, NotFoundError } = require('../errors');
 const { cleanProducts, findOwned, ownerFilter, pageParams } = require('../utils/shop');
+const { isAdmin } = require('../middleware/auth');
+
+// The orders collection also holds old records from other apps (SeedBridge-era buyer/farmer
+// orders with addresses and payment references, no createdBy). Shop orders always have an
+// orderTime, so non-admins only ever see those.
+const SHOP_ONLY = { orderTime: { $exists: true } };
+const shopFilter = (req) => (isAdmin(req) ? {} : { ...ownerFilter(req), ...SHOP_ONLY });
+const findShopOrder = async (req) => {
+    const order = await findOwned(Orders, req.params.id, req, 'order');
+    if (!isAdmin(req) && !order.orderTime) throw new NotFoundError(`No order with id ${req.params.id}`);
+    return order;
+};
 
 // GET /api/v1/orders  admin: all; signed in: theirs; anonymous: the demo orders. ?page=&limit= (max 100)
 const getAllOrders = async (req, res) => {
     const { limit, skip } = pageParams(req.query);
-    const orders = await Orders.find(ownerFilter(req)).sort('-createdAt').skip(skip).limit(limit);
+    const orders = await Orders.find(shopFilter(req)).sort('-createdAt').skip(skip).limit(limit);
     res.status(StatusCodes.OK).json({ msg: 'Get all Orders', nbHits: orders.length, orders });
 };
 
 // GET /api/v1/orders/:id
 const getOrder = async (req, res) => {
-    const order = await findOwned(Orders, req.params.id, req, 'order');
+    const order = await findShopOrder(req);
     res.status(StatusCodes.OK).json({ msg: 'Order Found', nbHits: 1, order });
 };
 

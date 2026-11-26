@@ -453,6 +453,8 @@ It matched Python bit for bit on CCMT photos and edge cases (odd sizes, RGBA, gr
 
 **Content.** `data/cropguard/content.json` holds the class list, guidance text, sources, warning texts, the disclaimer, regions and the policy defaults. It was generated from the old Python backend and is now the source of truth. Its rules are in the ML repo's `docs/CONTENT_POLICY.md`: visible signs and field hygiene only, no pesticide names or doses, real organisations only, and refer chemical decisions to a MoFA extension officer. `test/cropguard/unit.test.js` enforces them. If the ML repo's `labels.py` changes, update `classes` here too.
 
+**Accuracy check**: `node scripts/cropguardEvaluate.js ../ghanacropguard-ai/ml/data [--out report.json]` runs the served bundle through `Classifier.predict()` on the held-out test split. On 2026-11-26: 88.9% accuracy, macro precision/recall/F1 87.7/89.1/88.1%; the tomato classes are the weak ones (see PRODUCTION_AUDIT.md). Re-run it whenever the bundle changes.
+
 **Tests**: `npm run test:cropguard` (node:test).
 - `test/cropguard/api.test.js` starts the real `app.js` as a child process and calls it over HTTP. It refuses to run unless `CROPGUARD_TEST_MONGO_URI` is a local MongoDB whose database name ends in `_test` or `_tmp`. `mongodb-memory-server` run outside this repo works.
 - It uses `test/cropguard/tiny-model/`, a real 562-byte ONNX graph: mostly green → `cassava_mosaic`, mostly red → `cashew_red_rust`.
