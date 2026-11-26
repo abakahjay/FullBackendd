@@ -14,4 +14,6 @@ const userOrderSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
+// Indexes for the fields this collection is queried/sorted by (production audit).
+userOrderSchema.index({ userId: 1, weekStart: 1 });
 module.exports = mongoose.model("UserOrder", userOrderSchema);

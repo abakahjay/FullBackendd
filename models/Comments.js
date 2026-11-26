@@ -22,5 +22,7 @@ const commentSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 
+// Indexes for the fields this collection is queried/sorted by (production audit).
+commentSchema.index({ post: 1, created: -1 });
 const Comment = mongoose.model('Comment', commentSchema)
 module.exports = Comment;

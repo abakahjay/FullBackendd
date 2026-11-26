@@ -30,4 +30,7 @@ const feedbackSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
+// Indexes for the fields this collection is queried/sorted by (production audit).
+feedbackSchema.index({ orderId: 1 });
+feedbackSchema.index({ userId: 1, createdAt: -1 });
 module.exports = mongoose.model("FoodFeedback", feedbackSchema);

@@ -35,7 +35,6 @@ const authenticationMiddleware = async (req, res, next) => {
         }
 
         req.user = { userId, username, token };
-        console.log('✅ Token verified');
         next();
     } catch (error) {
         throw new UnauthenticatedError(`Not authorized: ${error.message}`);

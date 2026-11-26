@@ -110,6 +110,25 @@ if (process.env.TRUST_PROXY || process.env.RENDER) {
 }
 app.disable('x-powered-by');
 
+// Liveness/readiness probe for Render/PM2/uptime monitors: 200 only when Mongo is connected.
+app.get('/healthz', (req, res) => {
+    const up = mongoose.connection.readyState === 1;
+    res.status(up ? 200 : 503).json({ status: up ? 'ok' : 'degraded', db: up ? 'up' : 'down', uptime: Math.round(process.uptime()) });
+});
+
+// Security headers + the global /api rate limit run FIRST, so the upload, AI, posts and
+// other routers mounted before the body parsers are covered too. CSP stays per-area
+// (set further down), and resources may be embedded cross-origin by our own frontends.
+app.use(require('helmet')({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+const apiLimiter = require('express-rate-limit')({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: Number(process.env.API_RATE_LIMIT_PER_15_MIN) || 3000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { msg: 'Too many requests. Please slow down and try again shortly.' },
+});
+app.use('/api/', apiLimiter);
+
 // Any origin may call the API with a Bearer token; cookies are honoured only for
 // our own frontends (utils/corsPolicy.js - add new ones to CORS_ORIGINS).
 app.use(cors(require('./utils/corsPolicy').corsOptions));
@@ -179,7 +198,9 @@ app.use((req, res, next) => {
     return bodyParser.json()(req, res, next);
 });
 // The CleanBridge live stream carries its token in the query string - keep it out of the logs.
-app.use(logger("dev", { skip: (req) => req.originalUrl.startsWith("/api/v1/cleanbridge/events") }));
+// Tokens can arrive in the query string (?oven=, ?token=) - never write them to the logs.
+logger.token('safe-url', (req) => String(req.originalUrl || req.url).replace(/([?&](?:oven|token|access_token|code)=)[^&]*/gi, '$1[redacted]'));
+app.use(logger(':method :safe-url :status :response-time ms - :res[content-length]', { skip: (req) => req.originalUrl.startsWith("/api/v1/cleanbridge/events") }));
 // app.use(morgan('tiny'))
 
 
@@ -267,14 +288,7 @@ app.use(helmet());
 
 //Other middleware
 // Per client IP (see trust proxy above). Generous: ~3 requests a second, sustained.
-const apiLimiter = rateLimiter({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: Number(process.env.API_RATE_LIMIT_PER_15_MIN) || 3000,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { msg: 'Too many requests. Please slow down and try again shortly.' },
-})
-app.use("/api/", apiLimiter);
+// The global /api rate limiter is registered at the top of the file.
 
 
 app.use((req, res, next) => {
@@ -458,7 +472,7 @@ app.post('/api/chat', (req, res) => {
         return res.status(400).json({ msg: 'message must be text of at most 2000 characters' });
     }
 
-    const python = spawn('C:/ProgramData/anaconda4/python.exe', ['./chatbot/respond.py', userMessage]);//This is used to run python in javascript
+    const python = spawn(process.env.PYTHON_BIN || 'C:/ProgramData/anaconda4/python.exe', ['./chatbot/respond.py', userMessage]);//This is used to run python in javascript
     python.on('error', () => !res.headersSent && res.status(503).json({ msg: 'Chatbot is not available on this server.' }));
     setTimeout(() => python.kill(), 30000).unref();
 
@@ -513,7 +527,29 @@ const start = async () => {
     } catch (error) {
         console.log('Could not connect to MongoDB...');
         console.log(`Error: ${error}`);
+        // Exit so the process manager (PM2/Render/nodemon) restarts us instead of
+        // leaving a process that is up but serving nothing.
+        process.exit(1);
     }
 }
+
+process.on('unhandledRejection', (reason) => {
+    console.error('[unhandledRejection]', reason);
+});
+
+// Graceful shutdown: stop taking new connections, let in-flight requests finish,
+// close Mongo, then exit. Render/PM2 send SIGTERM on every deploy/restart.
+let shuttingDown = false;
+const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[${signal}] shutting down...`);
+    setTimeout(() => process.exit(1), 10000).unref();
+    server.close(() => {
+        mongoose.connection.close(false, () => process.exit(0));
+    });
+};
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 start();
 

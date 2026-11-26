@@ -12,4 +12,6 @@ const ussdSessionSchema = new mongoose.Schema({
   current_page: Number,
 }, { timestamps: true });
 
+// Indexes for the fields this collection is queried/sorted by (production audit).
+ussdSessionSchema.index({ sessionId: 1 });
 module.exports = mongoose.model('UssdSession', ussdSessionSchema);

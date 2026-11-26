@@ -33,5 +33,8 @@ const PostSchema = new mongoose.Schema({
         }
 },{ timestamps: true })//An extra Schema parameter for timestamps(important)
 
+// Indexes for the fields this collection is queried/sorted by (production audit).
+PostSchema.index({ created: -1 });
+PostSchema.index({ createdBy: 1, created: -1 });
 const Posts = mongoose.model("Posts", PostSchema);
 module.exports = Posts;

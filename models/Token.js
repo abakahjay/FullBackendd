@@ -15,4 +15,6 @@ const TokenSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes for the fields this collection is queried/sorted by (production audit).
+TokenSchema.index({ user: 1 });
 module.exports = mongoose.model('Token', TokenSchema);

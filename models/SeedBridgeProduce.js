@@ -40,4 +40,7 @@ SeedBridgeProduceSchema.virtual('freshRescue').get(function () {
     return this.status === 'fresh_rescue';
 });
 
+// Indexes for the fields this collection is queried/sorted by (production audit).
+SeedBridgeProduceSchema.index({ farmerId: 1, createdAt: -1 });
+SeedBridgeProduceSchema.index({ status: 1, crop: 1 });
 module.exports = mongoose.model("SeedBridgeProduce", SeedBridgeProduceSchema);

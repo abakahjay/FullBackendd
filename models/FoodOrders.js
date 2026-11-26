@@ -47,5 +47,8 @@ const foodordersSchema = new mongoose.Schema(
 );
 
 
+// Indexes for the fields this collection is queried/sorted by (production audit).
+foodordersSchema.index({ userId: 1, createdAt: -1 });
+foodordersSchema.index({ status: 1, createdAt: -1 });
 const FoodOrders = mongoose.model('FoodOrders', foodordersSchema);
 module.exports = FoodOrders;
