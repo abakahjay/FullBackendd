@@ -577,9 +577,8 @@ The FullBackendd API is shared by many live apps (Nsoro, GH-GPT, CleanBridge, Se
 
 ## Production hardening — continue here (started 2026-11-26)
 
-Branch `hardening/production-ready`, **not pushed yet** – push from your own terminal:
-`git push -u origin hardening/production-ready` (never push the `archive/*` branches: they contain an old `.env`), then
-open a PR into `main`. Full findings with evidence: `PRODUCTION_AUDIT.md`.
+Merged into `main` (fast-forward, 2026-11-26); Render deploys `main`, so it goes live on `git push origin main`
+(push from your own terminal; never push the `archive/*` branches: they contain an old `.env`). Full findings with evidence: `PRODUCTION_AUDIT.md`.
 
 **Tests** (59, all green 2026-11-26; CI runs them on every push via `.github/workflows/ci.yml`):
 `CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/x_test npm run test:security` (self-pentest + Paystack webhook failure
