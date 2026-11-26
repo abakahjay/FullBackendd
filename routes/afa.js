@@ -1,5 +1,8 @@
 const express = require('express');
 const router = express.Router();
+const authMiddleware = require('../middleware/auth');
+const adminOnly = require('../middleware/adminOnly');
+
 const {
   registerAFA,
   getAllAFA,
@@ -7,16 +10,11 @@ const {
   updateAFA,
 } = require('../controllers/afacontroller');
 
-// POST - Create new registration
+// Registering is public (static/afrohome.html). The list holds people's ID and phone numbers,
+// so reading and changing it is admin-only (static/afrodata.html sends the `token` cookie).
 router.post('/register', registerAFA);
-
-// GET - Get all registrations
-router.get('/registrations', getAllAFA);
-
-// PUT - Update a registration by ID
-router.put('/registrations/:id', updateAFA);
-
-// DELETE - Delete a registration by ID
-router.delete('/registrations/:id', deleteAFA);
+router.get('/registrations', authMiddleware, adminOnly, getAllAFA);
+router.put('/registrations/:id', authMiddleware, adminOnly, updateAFA);
+router.delete('/registrations/:id', authMiddleware, adminOnly, deleteAFA);
 
 module.exports = router;

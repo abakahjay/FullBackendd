@@ -50,7 +50,7 @@ const isOnline = (userId) => clients.has(String(userId));
 // EventSource can't send an Authorization header, so the app passes its JWT
 // as ?token=. Same checks as middleware/cleanbridgeAuth.js.
 const userIdFromToken = (token) => {
-    const decoded = jwt.verify(String(token || ""), process.env.JWT_SECRET);
+    const decoded = jwt.verify(String(token || ""), process.env.JWT_SECRET, { algorithms: ['HS256'] });
     if (decoded.app !== "cleanbridge") throw new Error("Not a CleanBridge token");
     return decoded.userId;
 };

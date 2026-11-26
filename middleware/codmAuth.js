@@ -11,7 +11,7 @@ const codmAuth = async (req, res, next) => {
 
     let decoded;
     try {
-        decoded = jwt.verify(token, process.env.JWT_SECRET);
+        decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     } catch {
         throw new UnauthenticatedError("Your session has expired. Please log in again.");
     }

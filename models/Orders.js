@@ -35,5 +35,7 @@ const OrderSchema = new mongoose.Schema([{
         }
 }],{ timestamps: true })//An extra Schema parameter for timestamps(important)
 
+OrderSchema.index({ createdBy: 1, orderTime: 1 });
+OrderSchema.index({ createdBy: 1, createdAt: -1 });
 const Orders = mongoose.model("Orders", OrderSchema);
 module.exports = Orders;

@@ -691,6 +691,12 @@ main.collapsed {
 </div>
 
   <script>
+
+    // Escapes text before it goes into innerHTML / attributes (server data can contain
+    // user-typed HTML, e.g. an AFA sign-up name).
+    function esc(v) {
+      return String(v ?? '').replace(/[&<>"'`]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c]));
+    }
     let userId = '';
     let userTok = '';
     let datas
@@ -874,16 +880,16 @@ async function fetchAFA() {
       // console.log("Registration:", reg);
       tr.innerHTML = `
         <td>${new Date(reg.createdAt).toLocaleString()}</td>
-        <td>${reg.fullname}</td>
-        <td>${reg.idnumber}</td>
-        <td>${reg.dob}</td>
-        <td>${reg.phone}</td>
-        <td>${reg.location}</td>
-        <td>${reg.region}</td>
-        <td>${reg.occupation}</td>
+        <td>${esc(reg.fullname)}</td>
+        <td>${esc(reg.idnumber)}</td>
+        <td>${esc(reg.dob)}</td>
+        <td>${esc(reg.phone)}</td>
+        <td>${esc(reg.location)}</td>
+        <td>${esc(reg.region)}</td>
+        <td>${esc(reg.occupation)}</td>
         <td>
-          <button class="btn cancel" onclick="deleteAFA('${reg._id}')">Delete</button>
-          <button class="btn update"  onclick="openUpdateModal('${reg._id}','${reg.fullname}','${reg.idnumber}','${reg.dob}','${reg.phone}','${reg.location}','${reg.region}','${reg.occupation}')">Edit</button>
+          <button class="btn cancel" onclick="deleteAFA('${esc(reg._id)}')">Delete</button>
+          <button class="btn update"  data-args="${esc(JSON.stringify([reg._id, reg.fullname, reg.idnumber, reg.dob, reg.phone, reg.location, reg.region, reg.occupation]))}" onclick="openUpdateModal(...JSON.parse(this.dataset.args))">Edit</button>
         </td>
       `;
       tbody.appendChild(tr);
@@ -909,21 +915,21 @@ async function fetchAFA() {
           const row = document.createElement("tr");
           row.innerHTML = `
           <td>${new Date(order.createdAt).toLocaleString()}</td>
-          <td>${order.recipient}</td>
-          <td>${order.quantity}</td>
-          <td>${order.network}</td>
-          <td>GHS ${order.price}</td>
+          <td>${esc(order.recipient)}</td>
+          <td>${esc(order.quantity)}</td>
+          <td>${esc(order.network)}</td>
+          <td>GHS ${esc(order.price)}</td>
           <td>
   <span class="badge ${order.payment === 'declined' ? 'status-declined' : 'status-pending'}">
-    ${order.payment}
+    ${esc(order.payment)}
   </span>
  
 </td>
 
-          <td><span class="badge status-${order.status.toLowerCase()}">${order.status}</span></td>
-          <td>${order.updated || ''}</td>
+          <td><span class="badge status-${esc(String(order.status).toLowerCase())}">${esc(order.status)}</span></td>
+          <td>${esc(order.updated || '')}</td>
          <td>
-  <select class="status-dropdown" data-order-id="${order._id}">
+  <select class="status-dropdown" data-order-id="${esc(order._id)}">
     <option value="Pending" ${order.status === "Pending" ? "selected" : ""}>Pending</option>
     <option value="Delivered" ${order.status === "Delivered" ? "selected" : ""}>Delivered</option>
     <option value="Failed" ${order.status === "Failed" ? "selected" : ""}>Failed</option>
@@ -1046,11 +1052,11 @@ document.querySelectorAll(".status-dropdown").forEach(select => {
           const row = document.createElement("tr");
           row.innerHTML = `
         <td>${new Date(user.createdAt).toLocaleString()}</td>
-        <td>${user.username}</td>
-        <td>${user.email}</td>
-        <td>${user.phone}</td>
+        <td>${esc(user.username)}</td>
+        <td>${esc(user.email)}</td>
+        <td>${esc(user.phone)}</td>
         <td>Active</td>
-        <td><button class="btn-download" onclick="deleteUser('${user._id}')">Delete</button></td>
+        <td><button class="btn-download" onclick="deleteUser('${esc(user._id)}')">Delete</button></td>
       `;
           tableBody.appendChild(row);
         });
@@ -1107,21 +1113,21 @@ document.querySelectorAll(".status-dropdown").forEach(select => {
         const row = document.createElement("tr");
         row.innerHTML = `
       <td>${new Date(order.createdAt).toLocaleString()}</td>
-      <td>${order.recipient}</td>
-      <td>${order.quantity}</td>
-      <td>${order.network}</td>
-      <td>${order.price}</td>
+      <td>${esc(order.recipient)}</td>
+      <td>${esc(order.quantity)}</td>
+      <td>${esc(order.network)}</td>
+      <td>${esc(order.price)}</td>
       <td>
   <span class="badge ${order.payment === 'declined' ? 'status-declined' : 'status-pending'}">
-    ${order.payment}
+    ${esc(order.payment)}
   </span>
  
 </td>
 
-      <td><span class="badge status-${order.status.toLowerCase()}">${order.status}</span></td>
-      <td>${order.updated}</td>
+      <td><span class="badge status-${esc(String(order.status).toLowerCase())}">${esc(order.status)}</span></td>
+      <td>${esc(order.updated)}</td>
       <td>
-  <select class="status-dropdown" data-order-id="${order._id}">
+  <select class="status-dropdown" data-order-id="${esc(order._id)}">
     <option value="Pending" ${order.status === "Pending" ? "selected" : ""}>Pending</option>
     <option value="Delivered" ${order.status === "Delivered" ? "selected" : ""}>Delivered</option>
     <option value="Failed" ${order.status === "Failed" ? "selected" : ""}>Failed</option>

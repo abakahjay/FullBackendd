@@ -9,6 +9,16 @@ const FoodOrders = require("../models/FoodOrders");
 
 const router = express.Router();
 
+// Writes need the shared User token (writeGuard in app.js puts the token's user into
+// req.body.userId). Editing or deleting feedback: its author or an admin/caterer.
+const ownFeedbackOrAdmin = async (req, id) => {
+    if (["admin", "caterer"].includes(req.user.role)) return;
+    const feedback = mongoose.Types.ObjectId.isValid(id) ? await Feedback.findById(id).select("userId").lean() : null;
+    if (!feedback || String(feedback.userId) !== String(req.user.userId)) {
+        throw new NotFoundError(`No feedback found with id:${id}`);
+    }
+};
+
 /**
  * POST /api/v1/feedbacks
  * Public: Submit feedback for a completed order
@@ -98,10 +108,17 @@ router.get("/user/:userId", async (req, res) => {
 router.patch("/:id", async (req, res) => {
     const { id } = req.params;
     if (!id) throw new BadRequestError("Please provide feedback id");
+    await ownFeedbackOrAdmin(req, id);
+
+    // Only these fields can be edited (never userId/orderId).
+    const updates = {};
+    for (const key of ["eaten", "delivered", "comment"]) {
+        if (req.body[key] !== undefined) updates[key] = key === "comment" ? String(req.body[key]).slice(0, 1000) : Boolean(req.body[key]);
+    }
 
     const updatedFeedback = await Feedback.findByIdAndUpdate(
         id,
-        req.body,
+        updates,
         { new: true, runValidators: true }
     )
         .populate("userId", "firstName lastName email")
@@ -124,6 +141,7 @@ router.patch("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
     const { id } = req.params;
     if (!id) throw new BadRequestError("Please provide feedback id");
+    await ownFeedbackOrAdmin(req, id);
 
     const feedback = await Feedback.findOneAndDelete({ _id: new ObjectId(id) });
     if (!feedback) throw new NotFoundError(`No feedback found with id:${id}`);

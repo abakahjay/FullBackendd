@@ -1,10 +1,16 @@
 const Orders = require('../models/MTNOrders');
 const { BadRequestError, NotFoundError } = require('../errors');
 const { StatusCodes } = require('http-status-codes');
+const User = require('../models/User');
+
+const STATUSES = ['Pending', 'Delivered', 'Failed'];
+const str = (v, n = 200) => (v === undefined || v === null ? undefined : String(v).slice(0, n));
 
 // ✅ GET all orders
 const getAllOrders = async (req, res) => {
-  const orders = await Orders.find({}).sort('-createdAt');
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 500, 1), 1000);
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const orders = await Orders.find({}).sort('-createdAt').skip((page - 1) * limit).limit(limit);
   res.status(StatusCodes.OK).json(orders);
 };
 
@@ -24,14 +30,22 @@ const createOrder = async (req, res) => {
     throw new BadRequestError("All fields except 'updated' are required.");
   }
 
-  const order = await Orders.create({ recipient, quantity, network, price, payment, status, updated });
+  // status/payment are never taken from a non-admin caller (they mark an order as paid/delivered).
+  const admin = req.user?.role === 'admin';
+  const order = await Orders.create({
+    recipient: str(recipient, 40), quantity: str(quantity, 40), network: str(network, 40), price: str(price, 20),
+    updated: str(updated, 64),
+    ...(admin ? { payment: str(payment, 100), status: STATUSES.includes(status) ? status : 'Pending' } : {}),
+  });
   res.status(StatusCodes.CREATED).json(order);
 };
 
 // ✅ UPDATE an order
 const updateOrder = async (req, res) => {
   const { id } = req.params;
-  const update = req.body;
+  const allowed = ['recipient', 'quantity', 'network', 'price', 'payment', 'status', 'updated', 'email', 'transactionId'];
+  const update = {};
+  for (const k of allowed) if (req.body?.[k] !== undefined) update[k] = str(req.body[k]);
 
   const order = await Orders.findByIdAndUpdate(id, update, {
     new: true,
@@ -78,8 +92,21 @@ const getOrdersByEmail = async (req, res) => {
   if (!email) {
     throw new BadRequestError("Email parameter is required");
   }
+  // GET /:email is also reached with an order id (the routes share the path).
+  if (/^[a-f0-9]{24}$/i.test(email)) {
+    if (req.user.role !== 'admin') throw new NotFoundError(`No order with ID: ${email}`);
+    return getOrder(Object.assign(req, { params: { id: email } }), res);
+  }
 
-  const orders = await Orders.find({ email }).sort('-createdAt');
+  // Signed-in users only see their own orders; admins can look anyone up.
+  if (req.user.role !== 'admin') {
+    const me = await User.findById(req.user.userId).select('email').lean();
+    if (!me || String(me.email).toLowerCase() !== String(email).toLowerCase()) {
+      throw new NotFoundError(`No orders found for email: ${email}`);
+    }
+  }
+
+  const orders = await Orders.find({ email: String(email) }).sort('-createdAt').limit(500);
 
   if (!orders || orders.length === 0) {
     throw new NotFoundError(`No orders found for email: ${email}`);

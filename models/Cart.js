@@ -35,5 +35,6 @@ const CartSchema = new mongoose.Schema([{
 
 
 
+CartSchema.index({ createdBy: 1, createdAt: -1 });
 const Orders = mongoose.model("Cart", CartSchema);
 module.exports = Orders;

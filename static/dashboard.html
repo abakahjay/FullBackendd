@@ -449,6 +449,12 @@ main {
 
 
   <script>
+
+    // Escapes text before it goes into innerHTML / attributes (server data can contain
+    // user-typed HTML, e.g. an AFA sign-up name).
+    function esc(v) {
+      return String(v ?? '').replace(/[&<>"'`]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c]));
+    }
     const authSection = document.getElementById("auth-section");
     const ordersList = document.getElementById("orders-list");
 
@@ -486,8 +492,8 @@ main {
       const displayText = user.role === "admin" ? "Admin" : (user.username || "User");
 
       authSection.innerHTML = `
-        <img src="${avatar || 'https://www.gravatar.com/avatar?d=mp'}" alt="Avatar" />
-        <span>${displayText}</span>
+        <img src="${esc(avatar || 'https://www.gravatar.com/avatar?d=mp')}" alt="Avatar" />
+        <span>${esc(displayText)}</span>
         <button class="login-btn" onclick="logout()">Logout</button>
         `;
 
@@ -532,17 +538,17 @@ main {
             const div = document.createElement("div");
             div.className = "order-card";
             div.innerHTML = `
-          <h3>Network ID: ${order.network}</h3>
-          <p><strong>Recipient:</strong> ${order.recipient}</p>
-          <p><strong>Bundle:</strong> ${order.quantity}</p>
-          <p><strong>Price:</strong> GHS ${order.price}</p>
+          <h3>Network ID: ${esc(order.network)}</h3>
+          <p><strong>Recipient:</strong> ${esc(order.recipient)}</p>
+          <p><strong>Bundle:</strong> ${esc(order.quantity)}</p>
+          <p><strong>Price:</strong> GHS ${esc(order.price)}</p>
           <p>
   <strong>Status:</strong> 
-  <span class="${getStatusClass(order.status)}">${order.status}</span>
+  <span class="${getStatusClass(order.status)}">${esc(order.status)}</span>
 </p>
 
           <p><strong>Order Time:</strong> ${new Date(order.createdAt).toLocaleString()}</p>
-          <button onclick='orderAgain(${JSON.stringify(order).replace(/"/g, '&quot;')})'>Order Again</button>
+          <button data-order="${esc(JSON.stringify(order))}" onclick="orderAgain(JSON.parse(this.dataset.order))">Order Again</button>
         `;
             ordersList.appendChild(div);
           });
@@ -565,7 +571,7 @@ main {
       //   console.log(order)
 
       // Fetch bundles from the backend using query parameter
-      fetch(`/api/v1/bundles?network=${order.network}`)
+      fetch(`/api/v1/bundles?network=${esc(order.network)}`)
         .then(res => {
           if (!res.ok) throw new Error("Network response was not ok");
           return res.json();

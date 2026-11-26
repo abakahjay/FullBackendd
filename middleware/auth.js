@@ -1,98 +1,85 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User.js');
-const { UnauthenticatedError } = require('../errors');
+const { UnauthenticatedError, UnauthorizedError } = require('../errors');
 
-const authenticationMiddleware = async (req, res, next) => {
-    let token;
+// Only HS256 is ever issued (models/User.js createJWT). Pinning it means a token
+// with `alg: none` or another algorithm is rejected even if a library default changes.
+const JWT_ALGORITHMS = ['HS256'];
 
-    // Priority 1: Bearer token in header
+// Where a token can come from, in priority order:
+// 1. Authorization: Bearer <token>   (every SPA / mobile client)
+// 2. the `token` cookie               (same-origin static pages: /afrodatadashboard, /api/v1/bundle/...)
+// 3. ?oven=<token>  only when ALLOW_QUERY_TOKEN=true. Tokens in URLs leak into browser history,
+//    proxies and Referer headers; no live page sends one any more (the old public/dashboard
+//    pages that did now redirect to /developers). Kept as an emergency switch.
+function readToken(req) {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
-        token = authHeader.split(' ')[1];
+        const t = authHeader.slice(7).trim();
+        if (t && t !== 'undefined' && t !== 'null') return t;
     }
+    if (req.cookies?.token) return req.cookies.token;
+    if (process.env.ALLOW_QUERY_TOKEN === 'true' && typeof req.query?.oven === 'string' && req.query.oven) return req.query.oven;
+    return null;
+}
 
-    // Priority 2: Token from cookie
-    if (!token && req.cookies?.token) {
-        token = req.cookies.token;
-    }
-
-    // Priority 3: Token from query (e.g. ?oven=token)
-    if (!token && req.query.oven) {
-        token = req.query.oven;
-    }
-
-    if (!token || token === 'undefined') {
-        throw new UnauthenticatedError('No valid token provided.');
-    }
-
+// Verifies the token and loads the user. Throws UnauthenticatedError on any problem.
+async function resolveUser(token) {
+    let decoded;
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const { userId, username } = decoded;
-
-        const user = await User.findById(userId).select('-password');
-        if (!user) {
-            throw new UnauthenticatedError('User not found.');
-        }
-
-        req.user = { userId, username, token };
-        next();
+        decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: JWT_ALGORITHMS });
     } catch (error) {
         throw new UnauthenticatedError(`Not authorized: ${error.message}`);
     }
+    const { userId, username } = decoded || {};
+    // Tokens from the other apps (CleanBridge, CropGuard, CODM, platform) have no userId claim.
+    if (!userId) throw new UnauthenticatedError('Not authorized: wrong token type.');
+    const user = await User.findById(userId).select('role username').lean();
+    if (!user) throw new UnauthenticatedError('User not found.');
+    return { userId: String(userId), username, role: user.role || 'user' };
+}
+
+const authenticationMiddleware = async (req, res, next) => {
+    const token = readToken(req);
+    if (!token) {
+        throw new UnauthenticatedError('No valid token provided.');
+    }
+    const u = await resolveUser(token);
+    req.user = { ...u, token };
+    next();
 };
 
+// Like authenticationMiddleware, but a request without any token continues as
+// anonymous (req.user stays undefined). A token that IS sent must be valid.
+// Used by the demo shop (cart/orders), whose frontend has no login yet.
+const optionalAuth = async (req, res, next) => {
+    const token = readToken(req);
+    if (!token) return next();
+    const u = await resolveUser(token);
+    req.user = { ...u, token };
+    next();
+};
+
+// Usage: router.get('/x', authMiddleware, requireRole('admin', 'caterer'), handler)
+// (same shape as requireRole in middleware/cleanbridgeAuth.js). The role is
+// read from the database on every request (resolveUser), never from the token or body.
+const requireRole = (...roles) => {
+    const guard = (req, res, next) => {
+        if (!req.user) throw new UnauthenticatedError('No valid token provided.');
+        if (!roles.includes(req.user.role)) {
+            throw new UnauthorizedError(`Access denied. Requires role: ${roles.join(' or ')}`);
+        }
+        next();
+    };
+    guard.roles = roles; // read by utils/apiDocs.js
+    return guard;
+};
+
+const isAdmin = (req) => req.user?.role === 'admin';
+
 module.exports = authenticationMiddleware;
-
-
-// const jwt = require('jsonwebtoken');
-// const User = require('../models/User.js')
-
-// const {UnauthenticatedError } = require('../errors')
-
-
-
-// const authenticationMiddleware = async (req, res, next) => {
-//     //We get the token from the headers of there request
-//     // console.log(req.headers.authorization);
-//     const authHeader = req.headers.authorization
-//     let token = req.cookies?.token || req.query.oven;
-//     // console.log(authHeader)
-    
-    
-//     if (!authHeader || !authHeader.startsWith('Bearer ')){
-//         throw new UnauthenticatedError('No token provided/Header Authorization(Bearer)')
-//     }
-//     token = authHeader.split(' ')[1]
-
-//     // console.log(token)
-//     if(token==='undefined'){
-//         console.warn('No token provided')
-//         return
-//     }
-
-//     try {
-//             //Verify the token if its valid
-//             const decoded = jwt.verify(token, process.env.JWT_SECRET);
-//             // console.log(decoded);
-
-//             //We got the value of the payload(data) after decoding the token and destructured it
-//             const { userId, username } = decoded//(payload)
-
-//             //We could also use the token payload id to   retrieve the user information with the user model
-//             const user = await User.findById(userId).select('-password');//Select will omit that parameter
-//             //The select method removes the password from the response
-//             // req.user = user;
-
-
-//             //We assigned the destructured values to the req.user variables
-//             req.user = { userId, username,token }
-//             // console.log({token})
-//             console.log('Token verified')
-//             //And then we go to the next step which is in the controllers
-//             next();
-//     } catch (error) {
-//         throw new UnauthenticatedError(`Not authorized  to access this route , Error: ${error.message}`)
-//     }
-// }
-
-// module.exports = authenticationMiddleware
+module.exports.optionalAuth = optionalAuth;
+module.exports.requireRole = requireRole;
+module.exports.isAdmin = isAdmin;
+module.exports.readToken = readToken;
+module.exports.JWT_ALGORITHMS = JWT_ALGORITHMS;

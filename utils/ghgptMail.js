@@ -24,7 +24,7 @@ const apiUrl = (path = "") => `${(process.env.ORIGIN || "http://localhost:7004")
 const PURPOSE = "ghgpt-unsubscribe";
 const unsubscribeToken = (userId) => jwt.sign({ uid: String(userId), purpose: PURPOSE }, process.env.JWT_SECRET);
 const verifyUnsubscribeToken = (token) => {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     if (decoded.purpose !== PURPOSE) throw new Error("Wrong token purpose");
     return decoded.uid;
 };

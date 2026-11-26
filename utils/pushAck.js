@@ -17,7 +17,7 @@ const makeAck = (claims) => ({
 
 const readAck = (token) => {
     try {
-        const claims = jwt.verify(String(token || ''), process.env.JWT_SECRET);
+        const claims = jwt.verify(String(token || ''), process.env.JWT_SECRET, { algorithms: ['HS256'] });
         return claims.purpose === 'push-ack' ? claims : null;
     } catch {
         return null;

@@ -1,5 +1,10 @@
 const express = require("express");
 const router = express.Router();
+const authMiddleware = require("../middleware/auth");
+const { requireRole, isAdmin } = require("../middleware/auth");
+const adminOnly = require("../middleware/adminOnly");
+const FoodOrders = require("../models/FoodOrders");
+const { NotFoundError } = require("../errors");
 const {
   createOrder,
   getUserOrders,
@@ -7,54 +12,57 @@ const {
   getTotalSpent,
   deleteOrder,
   updateOrderStatus,
-  getAdminData,          // ✅ Old reference (kept for safety)
-  getCatererData,
+  getCatererAnalytics,
   getAdminAnalytics,
-  getCatererAnalytics,   // ✅ New controller
-  setWeeklyMenu,         // 🆕 Caterer: set weekly meals
-  createWeeklyOrder,     // 🆕 User/Admin: place weekly order
-  updateDailyOrder,      // 🆕 User/Admin: update daily order
+  setWeeklyMenu,
+  createWeeklyOrder,
+  updateDailyOrder,
 } = require("../controllers/foodorders");
 
-// ======================================================
-// 📦 EXISTING ROUTES
-// ======================================================
+// Every food-order route needs the shared User JWT. The user is always taken from the token:
+// a non-admin's body/param userId is overwritten, so nobody can order, read or change for
+// someone else. Admins may still act for any user (they send the userId).
+router.use(authMiddleware);
 
-// Create new order (Worker/Admin)
-router.post("/", createOrder);
+const asSelf = (req, res, next) => {
+  if (!isAdmin(req)) {
+    if (req.body && typeof req.body === "object") req.body.userId = req.user.userId;
+    if (req.params.userId !== undefined) req.params.userId = req.user.userId;
+  }
+  next();
+};
+const selfParam = (req, res, next) => {
+  if (!isAdmin(req) && req.user.role !== "caterer" && req.params.userId !== req.user.userId) {
+    throw new NotFoundError("No orders found.");
+  }
+  next();
+};
+// Delete: the order's owner, or an admin/caterer.
+const ownOrderOrStaff = async (req, res, next) => {
+  if (isAdmin(req) || req.user.role === "caterer") return next();
+  const order = /^[a-f0-9]{24}$/i.test(req.params.orderId)
+    ? await FoodOrders.findById(req.params.orderId).select("userId").lean()
+    : null;
+  if (!order || String(order.userId) !== String(req.user.userId)) {
+    throw new NotFoundError(`No order found with id:${req.params.orderId}`);
+  }
+  next();
+};
+const staff = requireRole("admin", "caterer");
 
-// Get own orders (Worker/Admin)
-router.get("/user/:userId", getUserOrders);
-
-// Get all orders (Caterer/Admin)
-router.get("/all", getAllOrders);
-
-// Get total money spent (Admin)
-router.get("/total", getTotalSpent);
-
-// ✅ Admin-only: analytics (users, orders grouped daily, cumulative sum)
-router.get("/admin-data", getAdminAnalytics);
-
-// ✅ Caterer-only: grouped orders by meal
-router.get("/caterer-data", getCatererAnalytics);
-
-// Update order status (Caterer/Admin)
-router.patch("/:orderId/status", updateOrderStatus);
-
-// Delete order (Admin or Worker for own order)
-router.delete("/:orderId", deleteOrder);
-
-// ======================================================
-// 🧑‍🍳 NEW ROUTES: Weekly/Daily Meal Management
-// ======================================================
-
-// 🧾 Caterer: Set weekly menu (3+ meals per day)
-router.post("/weekly-menu", setWeeklyMenu);
-
-// 👷 Worker/Admin: Create weekly order (before Sunday 11 AM)
-router.post("/weekly-order", createWeeklyOrder);
-
-// 👷 Worker/Admin: Update today's order (before 11 AM)
-router.patch("/daily-order", updateDailyOrder);
+router.post("/", asSelf, createOrder);
+router.get("/user/:userId", selfParam, getUserOrders);
+router.get("/all", staff, getAllOrders);
+router.get("/total", adminOnly, getTotalSpent);
+router.get("/admin-data", adminOnly, getAdminAnalytics);
+router.get("/caterer-data", staff, getCatererAnalytics);
+router.patch("/:orderId/status", staff, updateOrderStatus);
+router.delete("/:orderId", ownOrderOrStaff, deleteOrder);
+router.post("/weekly-menu", staff, (req, res, next) => {
+  req.body.createdBy = req.user.userId;
+  next();
+}, setWeeklyMenu);
+router.post("/weekly-order", asSelf, createWeeklyOrder);
+router.patch("/daily-order", asSelf, updateDailyOrder);
 
 module.exports = router;

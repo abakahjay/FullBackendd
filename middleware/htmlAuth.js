@@ -3,13 +3,14 @@ const User = require('../models/User');
 
 const htmlAuth = async (req, res, next) => {
   try {
-    let token = req.cookies?.token || req.query.oven;
+    // The `token` cookie set by POST /api/v1/auth/login. ?oven= only with ALLOW_QUERY_TOKEN=true (see middleware/auth.js).
+    let token = req.cookies?.token || (process.env.ALLOW_QUERY_TOKEN === 'true' ? req.query.oven : undefined);
 
     if (!token || token === 'undefined') {
       return res.redirect('/api/v1/bundle/login');
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     const user = await User.findById(decoded.userId).select('-password');
 
     if (!user) {
