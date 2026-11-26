@@ -593,5 +593,10 @@ Branch `hardening/production-ready` (commit `bfcc792`), **not pushed yet** – p
 7. 🟡 Socket.IO `cors.origin: '*'` → reuse `utils/corsPolicy` origins.
 8. 🟢 Prune junk deps (`crypto`, `https`, `stream`, `buffer`, `logger`, `rate-limiter`, `xss-clean`), run `npm audit`.
 9. 🟢 `node --test` cases for payment failure paths (declined charge, duplicate/late Paystack webhook, refund funding).
+10. 🔴 Run the skill's **section B self-pentest** against a local/staging copy (never prod data or live payments): NoSQL injection, XSS, IDOR with two test users, JWT forgery (`alg:none`, edited payload), login brute force vs the limiter, 50 MB body, malicious uploads, `Origin: evil.example`, webhook replay. Save the scripts in `test/security/` and record "verified" in `PRODUCTION_AUDIT.md`.
+11. 🟠 Validate env at boot (fail if `JWT_SECRET` < 32 chars or `MONGO_URI` missing); add `/readyz`; set PM2 `max_memory_restart`.
+12. 🟠 Daily MongoDB Atlas backups with a **tested** restore; Sentry (or similar) for errors; uptime monitor on `/healthz`.
+13. 🟡 CI (GitHub Actions): `npm ci --legacy-peer-deps`, `node --check`, `npm run test:cropguard`, `npm run test:platform`, `npm audit --omit=dev`; deploy to Render only from green `main`.
+14. 🟡 Before scaling past one Render instance: move rate-limit counters and Socket.IO to Redis (`rate-limit-redis`, `@socket.io/redis-adapter`); GridFS is already shared.
 
 Other projects in `Desktop/VS Projects` have **not** been audited yet; run `/production-ready-app` in each (CODM, CleanBridge-GH, JayRouter, helpdesk-main, ghanacropguard-ai, GHGPT-main, React-products-master, …).
