@@ -29,7 +29,7 @@ const PostSchema = new mongoose.Schema({
         },
         created:{
             type:Number,
-            default:Date.now()
+            default:Date.now // the function, not Date.now() (that would be the server start time)
         }
 },{ timestamps: true })//An extra Schema parameter for timestamps(important)
 

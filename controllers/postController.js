@@ -39,8 +39,17 @@ exports.createPost = async (req, res) => {
   
 };
 
+// Public profile fields only: posts are readable without a login, so never populate the
+// password hash, login tokens, reset fields, email or phone of the people in them.
+const POST_USER_FIELDS = '-password -tokens -resetPasswordToken -resetPasswordExpires -verificationToken -email -phone';
+
+// GET /api/v1/posts?page=&limit=  newest first. Without ?limit it returns up to 500 posts
+// (Nsoro Explore and the GH-GPT feed read the whole list), with ?limit at most 100 per page.
 exports.getPosts = async (req, res) => {
-    const posts = await Post.find().populate('user').populate('comments').sort('-created');
+    const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100) : 500;
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const posts = await Post.find().populate('user', POST_USER_FIELDS).populate('comments').sort('-created')
+        .skip((page - 1) * limit).limit(limit);
     res.status(StatusCodes.OK).json({nbHits:posts.length,posts});
 };
 
@@ -55,7 +64,7 @@ exports.getUserPosts = async (req, res) => {
     if(!user){
       throw new NotFoundError(`No User found with id:${id}`)
     }
-    const posts = await Post.find({createdBy: id}).populate('comments').populate('likes').populate('user').sort('-created');
+    const posts = await Post.find({createdBy: id}).populate('comments').populate('likes', POST_USER_FIELDS).populate('user', POST_USER_FIELDS).sort('-created').limit(500);
   
     console.log('\x1b[36m%s\x1b[0m',`${user.username} posts found`)
     res.status(StatusCodes.OK).json({message:`${user.username} posts found`,nbHits:posts.length,posts});

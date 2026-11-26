@@ -93,7 +93,7 @@ const UserSchema = new mongoose.Schema({
     tokens: [{ type: String }], // Array to store tokens
     created:{
         type:Number,
-        default:Date.now()
+        default:Date.now // the function, not Date.now() (that is the server start time)
     },
     phone: String,
     resetPasswordToken: { type: String },
@@ -150,6 +150,17 @@ UserSchema.methods.comparePasswords =async function (canditatePassword) {
 
 UserSchema.index({ email: 1 }, { unique: true }); // Ensure unique index on email
 UserSchema.index({ username: 1 }, { unique: true }); // Ensure unique index on username
+
+// Never send secrets in any JSON response, including users populated into posts, comments,
+// followers and messages (GET /api/v1/posts used to return password hashes and login tokens).
+// Server code still reads these fields on the document; only the JSON output drops them.
+const SECRET_FIELDS = ['password', 'tokens', 'resetPasswordToken', 'resetPasswordExpires', 'verificationToken'];
+UserSchema.set('toJSON', {
+    transform: (doc, ret) => {
+        for (const key of SECRET_FIELDS) delete ret[key];
+        return ret;
+    },
+});
 
 const User = mongoose.model("User", UserSchema);
 module.exports = User;

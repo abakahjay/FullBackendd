@@ -88,7 +88,8 @@ const signUp = async (req, res) => {
 const login = async (req, res) => {
     const { email, password } = req.body;
     // Never log req.body here: it contains the plaintext password.
-    if (!email || !password) {
+    // Strings only: an object here ({ "$ne": null }) is an injection attempt, not a login.
+    if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
         throw new BadRequestError('PLease Provide Email and Password')
     }
 
@@ -189,7 +190,7 @@ const verifyEmail = async (req, res) => {
         throw new BadRequestError('No Token Provided')
     }
     // Verify the token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET,);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     if (!decoded) {
         throw new UnauthenticatedError('Email Was not Verified(Invalid Token)')
     }
