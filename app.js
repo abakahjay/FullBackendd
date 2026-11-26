@@ -63,6 +63,7 @@ const muviinRoutes = require("./routes/muviin");
 const ussd = require("./routes/ussd.js");
 const authMiddleware = require("./middleware/auth.js");
 const htmlAuth = require('./middleware/htmlAuth'); // Import it
+const writeGuard = require('./middleware/writeGuard');
 const reloadlyRoutes = require('./routes/reloadlyRoutes');
 const { ClerkExpressRequireAuth } = require("@clerk/clerk-sdk-node");//This handles user logins  and stuff
 const paystackRoutes = require("./routes/paystackRouter");
@@ -109,11 +110,38 @@ if (process.env.TRUST_PROXY || process.env.RENDER) {
     app.set('trust proxy', Number(process.env.TRUST_PROXY) || 1);
 }
 app.disable('x-powered-by');
+// Set by the SIGTERM/SIGINT handler at the bottom; /readyz answers 503 once it is true.
+let shuttingDown = false;
 
 // Liveness/readiness probe for Render/PM2/uptime monitors: 200 only when Mongo is connected.
 app.get('/healthz', (req, res) => {
     const up = mongoose.connection.readyState === 1;
     res.status(up ? 200 : 503).json({ status: up ? 'ok' : 'degraded', db: up ? 'up' : 'down', uptime: Math.round(process.uptime()) });
+});
+
+// Readiness: actually round-trips to Mongo (2s cap) and answers 503 while shutting down, so a
+// load balancer stops sending traffic before the process exits. Use for uptime monitors.
+app.get('/readyz', async (req, res) => {
+    if (shuttingDown) return res.status(503).json({ status: 'shutting_down' });
+    const started = Date.now();
+    try {
+        if (mongoose.connection.readyState !== 1) throw new Error('not connected');
+        await Promise.race([
+            mongoose.connection.db.admin().ping(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000)),
+        ]);
+        const mem = process.memoryUsage();
+        res.set('Cache-Control', 'no-store').json({
+            status: 'ready',
+            db: 'up',
+            dbPingMs: Date.now() - started,
+            uptime: Math.round(process.uptime()),
+            rssMb: Math.round(mem.rss / 1048576),
+            heapUsedMb: Math.round(mem.heapUsed / 1048576),
+        });
+    } catch (err) {
+        res.status(503).set('Cache-Control', 'no-store').json({ status: 'not_ready', db: 'down', error: err.message });
+    }
 });
 
 // Security headers + the global /api rate limit run FIRST, so the upload, AI, posts and
@@ -223,7 +251,8 @@ app.use('/api/v1/ghgpt', require('./routes/ghgptUploadRoutes'));
 app.use('/api/v1/ai', aiImageRoutes);
 app.use('/api/v1/ai', aiModelRoutes);
 
-app.use("/api/v1/meals", mealRoutes);
+// Meals: reading the menu is public; writes need an admin/caterer token (middleware/writeGuard.js).
+app.use("/api/v1/meals", writeGuard({ roles: ['admin', 'caterer'], ownerField: 'createdBy' }), mealRoutes);
 
 // Initialize Passport
 app.use(passport.initialize());
@@ -249,11 +278,17 @@ const https = require('https');
 const http = require('http');
 // const socketIo = require('socket.io');
 const server = http.createServer(app);
+// Any origin may connect (the Nsoro web, Android TWA, Windows Electron and Expo apps all differ):
+// every socket must present a valid JWT in `auth.token` (utils/socket.js io.use), and no cookies
+// are accepted, so an open origin can't be abused. Messages are capped at 1 MB.
 const io = require('socket.io')(server, {
     cors: {
-        origin: '*', // Allow any origin for development
+        origin: '*',
         methods: ['GET', 'POST'],
+        credentials: false,
     },
+    maxHttpBufferSize: 1e6,
+    pingTimeout: 20000,
 });
 
 
@@ -348,6 +383,9 @@ app.use('/api/v1/ghgpt', require('./routes/ghgpt'));
 app.use('/api/v1/push', require('./routes/push'));
 
 
+// UniServe: adding universities/programs is admin-only; students can still submit their inputs.
+app.use('/api/v1/uniserve/universities', writeGuard({ roles: ['admin'] }));
+app.use('/api/v1/uniserve/programs', writeGuard({ roles: ['admin'] }));
 app.use('/api/v1/uniserve', uniServe);
 
 app.use('/api/v1/export', downloadExcelRoute);
@@ -368,7 +406,8 @@ app.use('/api/v1/afa', afaRoutes);
 
 app.use("/api/v1/foodorders", foodordersRoutes);
 
-app.use("/api/v1/feedbacks", feedbackRoutes);
+// Feedback: reading is public; writes need a signed-in user, who is always the author.
+app.use("/api/v1/feedbacks", writeGuard({ ownerField: 'userId' }), feedbackRoutes);
 
 // Portfolio site forms (matches frontend's fetch('api/contact') / fetch('api/order'))
 
@@ -502,6 +541,11 @@ const port = process.env.PORT || 7004;
 
 
 const start = async () => {
+    // Fail fast on a missing MONGO_URI / JWT_SECRET (utils/checkEnv.js); weak secrets only warn.
+    if (!require('./utils/checkEnv').assertEnv()) {
+        console.error('[env] fix the variables above (see .env.example), then restart.');
+        process.exit(1);
+    }
     try {
         //Connect the Database
         //We must always include our connect database method in the server application
@@ -536,17 +580,23 @@ const start = async () => {
 process.on('unhandledRejection', (reason) => {
     console.error('[unhandledRejection]', reason);
 });
+// A thrown error nobody caught leaves the process in an unknown state: log it and exit so
+// PM2/Render start a clean one (graceful shutdown first, hard stop after 10s).
+process.on('uncaughtException', (err) => {
+    console.error('[uncaughtException]', err);
+    shutdown('uncaughtException', 1);
+});
 
 // Graceful shutdown: stop taking new connections, let in-flight requests finish,
 // close Mongo, then exit. Render/PM2 send SIGTERM on every deploy/restart.
-let shuttingDown = false;
-const shutdown = (signal) => {
+const shutdown = (signal, code = 0) => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`[${signal}] shutting down...`);
     setTimeout(() => process.exit(1), 10000).unref();
+    io.close();
     server.close(() => {
-        mongoose.connection.close(false, () => process.exit(0));
+        mongoose.connection.close(false, () => process.exit(code));
     });
 };
 process.on('SIGTERM', () => shutdown('SIGTERM'));
