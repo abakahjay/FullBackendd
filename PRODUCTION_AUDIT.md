@@ -1,45 +1,65 @@
 # Production audit: FullBackendd
 
-Branch: `hardening/production-ready` · Audited 2026-11-26 with the `production-ready-app` skill.
+Branch: `hardening/production-ready` · Audited 2026-11-26 with the `production-ready-app` skill (sections A–F; G/H apply to the frontends).
 Stack: Node 22 · Express 4 · Mongoose 5 (MongoDB) · Socket.IO · Paystack · OpenAI/OpenRouter/Gemini · PM2/Render.
 
-Overall, this backend is in better shape than most: Helmet, mongo-sanitize, xss-clean, a CORS policy, raw-body webhook signatures, upload caps, per-area auth and a Brevo email provider are already in place. The gaps were mostly in ordering, operations and data access.
+**Tests:** 59 automated tests, all passing on a throwaway MongoDB.
+
+```
+CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/any_test npm run test:security    # 21: self-pentest + payment failure paths
+CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/any_test npm run test:cropguard   # 31
+CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/any_test npm run test:platform    # 7
+```
+
+No local MongoDB? Use `mongodb-memory-server` from a folder outside this repo (see CLAUDE.md). CI runs all three on every push (`.github/workflows/ci.yml`).
 
 ## Fixed on this branch
 
-| # | Area | Change | Where |
-|---|------|--------|-------|
-| 1 | Security | Helmet and the global `/api` rate limit now run **before** every router. Previously the upload, AI image/model, posts, stories, voice-notes, meals, GH-GPT upload, CropGuard, CODM and platform routes were mounted above them, so they got no security headers and no global limit. CSP stays per-area as before, and media can still be embedded cross-origin. | `app.js` |
-| 2 | Secrets in logs | Morgan logged full URLs, and auth accepts tokens via `?oven=`. Tokens in `oven`, `token`, `access_token` and `code` query params are now redacted from request logs. | `app.js` |
-| 3 | Log noise | Removed the `console.log('✅ Token verified')` that ran on every authenticated request. | `middleware/auth.js` |
-| 4 | Scale: pooler | Mongo connection now uses an explicit pool (`MONGO_POOL_SIZE`, default 20), a 10s server-selection timeout (it fails fast instead of hanging requests) and a 45s socket timeout. | `db/connect.js` |
-| 5 | Scale: indexes | Added indexes for the fields these collections are filtered and sorted by: Posts (`created`, `createdBy+created`), Comments (`post+created`), FoodOrders (`userId+createdAt`, `status+createdAt`), Token (`user`), UserOrder (`userId+weekStart`), UssdSession (`sessionId`), SeedBridgeProduce (`farmerId+createdAt`, `status+crop`), FoodFeedback (`orderId`, `userId+createdAt`). | `models/*` |
-| 6 | Ops | `GET /healthz` returns 200 or 503 with the DB state, for Render/PM2/UptimeRobot. | `app.js` |
-| 7 | Prod failure path | If Mongo is unreachable at boot, the process now exits(1) so PM2/Render restarts it. Before, it stayed alive serving nothing. | `app.js` |
-| 8 | Prod failure path | Graceful SIGTERM/SIGINT shutdown: in-flight requests finish, Mongo closes, with a 10s hard stop. `unhandledRejection` is now logged. | `app.js` |
-| 9 | "Works on my machine" | `/api/chat` hard-coded `C:/ProgramData/anaconda4/python.exe`, which doesn't exist on Linux hosts. It now reads `PYTHON_BIN` and keeps the old path as the default. | `app.js` |
+"Verified" means a test in `test/security/` attacks it and passes. Re-run it after any change.
 
-New optional env vars: `MONGO_POOL_SIZE`, `MONGO_SERVER_SELECTION_MS`, `PYTHON_BIN`.
+| # | Sev | Finding | Fix | Verified |
+|---|-----|---------|-----|----------|
+| 1 | 🔴 | **`GET /api/v1/posts` and `/posts/user/:id` leaked every poster's password hash, `tokens` (live login JWTs: anyone could sign in as them), reset fields and email.** Public, no login needed. | `models/User.js` `toJSON` drops `password`, `tokens`, `resetPassword*`, `verificationToken` from every JSON response. Post populates select public fields only (`POST_USER_FIELDS`, also hides email and phone, as `getAllUsers` already did). | ✅ `data leak` |
+| 2 | 🔴 | **Stored XSS on the admin dashboard.** The public AFA sign-up stores `fullname` etc., and `static/afrodata.html` rendered them with `innerHTML` and inside an `onclick`. MTN order fields had the same issue on `dashboard.html`. | `esc()` helper in both pages; every server value is escaped. The edit and order-again buttons pass data through `data-*` + `JSON.parse` instead of building JS strings. | ✅ payload stored as text (`IDOR: AFA`); page code reviewed |
+| 3 | 🔴 | **Cart/Orders IDOR.** Anyone could list every cart/order, and read, change or delete any of them by id. | `optionalAuth` + ownership (`utils/shop.js`). A cart/order with `createdBy` is visible only to its owner or an admin (404 otherwise). The Amazon demo's anonymous shared cart still works without a login. Listing every cart, creating and deleting carts need a login; editing/deleting orders is admin-only. | ✅ `IDOR: shop` |
+| 4 | 🔴 | **AFA registrations (ID numbers, phones) and MTN data orders were world-readable and editable.** | `authMiddleware, adminOnly` on list/update/delete (the admin dashboard sends the `token` cookie). `GET /ordersdata/:email` returns only your own email's orders unless you are an admin. A non-admin creating an MTN order can't set `status` or `payment`. Update bodies are whitelisted. AFA sign-ups are no longer printed to the log. | ✅ `IDOR: AFA` |
+| 5 | 🔴 | **Food orders, meals, feedback and UniServe writes trusted `userId`/`createdBy` from the body, with no auth.** Anyone could change meal prices, read anyone's orders, or post as anyone. | Food orders: login required, user taken from the token, staff routes `requireRole('admin','caterer')`, totals and admin analytics `adminOnly`. Meals/menus: writes need admin/caterer. Feedback: writes need a login, and editing or deleting is author/staff only. UniServe: adding universities/programs is admin-only (`middleware/writeGuard.js`). | ✅ `access: food orders` |
+| 6 | 🟠 | JWT `alg` not pinned; tokens accepted from `?oven=` (leak via history/Referer/logs). | `algorithms: ['HS256']` on every `jwt.verify`. `?oven=` is off; only dead pages used it. `ALLOW_QUERY_TOKEN=true` turns it back on in an emergency. | ✅ `auth: alg:none…` |
+| 7 | 🟠 | The login accepted objects (`{"$ne":null}`) and answered a confusing 404. Not a bypass (mongo-sanitize), but wrong. | Strings only, 400 otherwise. | ✅ `injection` |
+| 8 | 🟠 | N+1 pricing: two DB queries per cart line on every cart change. `createOrders` loaded **all** orders on every checkout. | `priceLines()` uses 2 queries in total. Orders use `findOne({ orderTime, createdBy })` with new indexes. Cart/order lists are paginated (`?page=&limit=`, max 100). | ✅ |
+| 9 | 🟡 | Business logic: negative, zero or huge quantities, non-ObjectId product ids, client-sent prices on carts. | `cleanProducts()` whitelists fields, quantity 1–100. Cart totals are always computed on the server. `await cart.save()` used to be missing, so validation errors were silently lost. | ✅ |
+| 10 | 🟡 | Estimated delivery dates and `Posts.created` / `User.created` were frozen at server start (`dayJs()` at module load, `default: Date.now()`). | Computed per request; `default: Date.now`. | — |
+| 11 | 🟡 | Unbounded lists: posts feed (with populate), MTN orders, AFA list. | Posts: max 500 without `?limit`, 100 per page with it. MTN/AFA: 500/1000 with `?page=`. | ✅ `?limit=1` |
+| 12 | 🟡 | Socket.IO `origin: '*'`. | Reviewed and kept on purpose: every socket must present a JWT (`utils/socket.js`), no cookies (`credentials: false`), and the Nsoro web, TWA, Electron and Expo apps all have different origins. Added a 1 MB message cap and `pingTimeout`. `io.close()` on shutdown. | — |
+| 13 | 🟢 | Typosquat-prone or unused deps shadowing Node built-ins: `crypto`, `https`, `stream`, `buffer`, plus `logger`, `rate-limiter`. Broken unused ESM `middleware/foodmiddleware.js`. | Removed. `npm audit fix` (non-breaking): 90 → 64 advisories. | ✅ all suites green after |
+| 14 | Ops | No readiness probe, no env validation, `uncaughtException` not handled, no PM2 memory cap, no CI. | `GET /readyz` (real Mongo ping, 2 s cap, 503 while shutting down, memory stats). `utils/checkEnv.js`: the boot fails if `MONGO_URI`/`JWT_SECRET` are missing and warns on weak secrets. `uncaughtException` → graceful exit. `ecosystem.config.js` (`max_memory_restart` 450M, backoff). `.github/workflows/ci.yml`. | ✅ `ops` |
+| 15 | Earlier | Helmet and the `/api` limiter before every router; morgan token redaction; Mongo pool and timeouts; `/healthz`; exit(1) on DB failure; graceful SIGTERM; `PYTHON_BIN`; indexes. | (commit `bfcc792`) | ✅ `ops`, `CORS`, `DoS` |
 
-## Needs your decision (not changed: would break a frontend)
+Also verified by attack test, no change needed: forged/unsigned Paystack webhooks (SeedBridge, CODM) are rejected; sign-up with `"role":"admin"` gives `user`; the login limiter answers 429; a 60 MB body gets 413 and the server stays up; malformed JSON has no stack trace; a foreign `Origin` gets no `Allow-Credentials`; `/.env`, `/.git/config`, `/app.js`, `/package.json` are not served.
 
-| Severity | Finding | Evidence | Recommended fix |
-|---|---|---|---|
-| 🔴 Critical | **Cart and Orders have no auth.** `GET /api/v1/cart` and `GET /api/v1/orders` return every user's carts and orders, and anyone can PATCH or DELETE any cart or order by id (IDOR). | `routes/cart.js`, `routes/orders.js`, `controllers/cart.js:12`, `controllers/orders.js:10` | Add `authMiddleware` and filter by `req.user.userId` (the models already have a User ref). Update the shop frontend to send the Bearer token. |
-| 🔴 Critical | Same pattern to check: `/api/v1/delivery`, `/api/v1/ordersdata` (MTN orders), `/api/v1/afa` list, `/api/v1/foodorders` admin lists | `controllers/MTNOrders.js:7`, `afacontroller.js:31`, `foodorders.js` | Gate admin lists with `adminOnly`, and user lists by owner. |
-| 🟠 High | Google OAuth open redirect: `redirect_uri` accepts any host, so a crafted link sends a real login token to an attacker's site. This is documented in CLAUDE.md as a deliberate tradeoff. | `utils/oauthRedirect.js` | Turn `isAllowedRedirectUri()` back on with `ALLOWED_REDIRECT_DOMAINS` listing your frontends. One env line per new app. |
-| 🟠 High | JWT accepted in a query param (`?oven=`), which leaks into browser history, proxies and Referer headers. Logs are now redacted. | `middleware/auth.js` | Move those pages to the cookie or header and drop `?oven=`. |
-| 🟡 Medium | Unbounded list endpoints (no pagination): posts feed (with `populate('comments')`), carts, orders, food orders, universities/programs | `postController.js:43` + list above | Add `?page=&limit=` with a max of 50–100, and return `nextCursor`. |
-| 🟡 Medium | Socket.IO CORS is `origin: '*'`. It's mitigated by JWT auth on connect. | `app.js` | Reuse `utils/corsPolicy` origins. |
-| 🟡 Medium | `createOrders` loads **all** orders (`Orders.find({})`) on every checkout to find a match by `orderTime`. This is O(n) per request. | `controllers/orders.js:41` | `Orders.findOne({ orderTime, createdBy })` with an index. |
-| 🟡 Medium | Heavy jobs run inline in requests: AI generation, image processing (sharp), Excel export, email | `controllers/*` | Move them to a queue (BullMQ + Redis) when traffic grows. |
-| 🟢 Low | Old/unused deps that are typosquat-prone or redundant: `crypto`, `https`, `stream`, `buffer`, `logger`, `rate-limiter`, plus many transitive deps listed directly. `xss-clean` is unmaintained. | `package.json` | Prune them, then run `npm audit`. |
-| 🟢 Low | No automated tests for money flows: Paystack/MoMo charge fails, webhook arrives twice or late, refund funding. Only CropGuard/platform tests exist. | `test/` | Add `node --test` cases for the CODM/SeedBridge/CleanBridge payment failure paths. |
+**Payment failure paths (CODM webhook, `test/security/payments.test.js`)**, all ✅: wrong signature; declined charge; wrong amount, currency, player or app; duplicate and late webhooks (idempotent, `paidAt` unchanged); paying twice keeps the first reference; a refunded checkout never re-pays; unknown reference ignored; malformed JSON gives 400.
+
+## Needs your decision
+
+| Sev | Item | Why it isn't done | Recommendation |
+|-----|------|-------------------|----------------|
+| 🔴 | **Weak `JWT_SECRET`.** The local `.env` secret is 17 characters; production is probably the same value. A short HS256 secret can be brute-forced offline from any token, which lets an attacker mint admin tokens. | Rotating it signs every user out of every app. | Generate 48 random bytes (command in `utils/checkEnv.js`), set it on Render, then set `REQUIRE_STRONG_SECRETS=true`. |
+| 🔴 | **Secrets in git history.** `.env` was committed before (see CLAUDE.md), and the archived branches `archive/*` (imported from the old `FullBackendd-master` clone) contain `.env` too. | Rotation and history rewrites are owner actions. | Rotate the Paystack, OpenAI, Reloadly, Clerk and email keys. **Never push the `archive/*` branches.** |
+| 🟠 | Google OAuth accepts any `redirect_uri` (open redirect for the login token). | Kept by the owner's choice (CLAUDE.md). | Turn on `isAllowedRedirectUri()` and list the frontends in `ALLOWED_REDIRECT_DOMAINS`. |
+| 🟠 | 64 `npm audit` advisories need major upgrades: **mongoose 5 → 8** (most of the criticals, via the mongodb driver), nodemailer, sharp, multer, express-fileupload, imagekit, validator, path-to-regexp. | These change APIs. Mongoose 8 is a migration (callbacks, `useFindAndModify`, `execPopulate`, `strictQuery`). | One upgrade per PR, each with the test suites. Start with sharp/nodemailer/validator (drop-in), then mongoose. |
+| 🟠 | `adminOnly` answers **401** to a signed-in non-admin. Some frontends treat any 401 as "session expired" and sign the user out. | Changing it to 403 changes behaviour for Nsoro admin pages. | Switch to `UnauthorizedError` (403) after checking Nsoro's API interceptor. |
+| 🟡 | The Amazon demo shop has no login, so its anonymous cart/orders are shared by every visitor and editable by anyone (vandalism only; no personal data). | Needs a login in `React-products-master/Amazon`. | Add login → send the Bearer token → user-owned carts work automatically. |
+| 🟡 | Heavy work runs inline in requests: AI generation, sharp, Excel export, email. | Needs Redis. | BullMQ + Redis when traffic grows. |
+| 🟡 | Backups, error tracking and an uptime monitor are not set up (infra). | Needs accounts. | Atlas daily backups + **a tested restore**; Sentry (`@sentry/node`, DSN in env); UptimeRobot on `/readyz`. |
+| 🟢 | More than one Render instance. | Rate limits and Socket.IO rooms are in memory. | `rate-limit-redis` + `@socket.io/redis-adapter` first. |
+| 🟢 | `engines` / `.nvmrc` not pinned. | Render reads them and would switch Node versions on the next deploy. | Pin to the Node version Render runs today (check the deploy log). |
 
 ## Already good ✅
-Parameterised Mongo queries plus `express-mongo-sanitize` · Helmet · per-area CSP · CORS allow-list for cookies · Paystack HMAC on the raw body · upload size and type limits · auth/password-reset limiters · trust-proxy for Render · real email provider (Brevo) with an SMTP fallback · OpenAI SDK built-in retries with backoff · JWT expiry via `JWT_LIFETIME` · `.env` not in git · admin-account audit on boot.
+Parameterised Mongo queries + `express-mongo-sanitize` · Helmet (now before every router) · per-area CSP · CORS allow-list for cookies · Paystack HMAC on the raw body (SeedBridge, CODM) · idempotent CODM charge handling and refund claims · upload size/type limits and magic-byte checks (CropGuard, platform) · auth, sign-up and password-reset limiters · trust-proxy for Render · Gmail-relay/Brevo email (Render blocks SMTP) · SHA-256-hashed single-use reset tokens · token-version revocation (CropGuard, CODM, platform) · Socket.IO JWT auth · E2E-encrypted DMs.
 
 ## Before deploying this branch
-1. Run `npm start` locally and hit `/healthz`. Expect `{"status":"ok","db":"up"}`.
-2. Upload a post image from Nsoro to confirm cross-origin media still loads.
-3. Mongo builds the new indexes automatically on first boot. They are small collections, so this takes seconds.
+1. `npm ci --legacy-peer-deps`, `npm start`, open `/healthz` and `/readyz`.
+2. Log in on the MTN/AFA admin dashboard (`/afrodatadashboard`) as an admin: the AFA and orders tables must load (they now need the admin cookie).
+3. Nsoro: open Explore/Search (uses `GET /api/v1/posts`) and upload a post.
+4. Amazon demo: add to cart, change the quantity, place an order.
+5. Set the three admin accounts (see CLAUDE.md), then watch the boot log for `[env] warning` lines.

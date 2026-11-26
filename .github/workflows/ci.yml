@@ -1,0 +1,54 @@
+# Runs on every push and pull request. Deploy to Render only from a green `main`
+# (Render: Settings -> Build & Deploy -> "Auto-Deploy: After CI checks pass").
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      # Throwaway database: the test harness refuses anything that isn't local *_test.
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      CROPGUARD_TEST_MONGO_URI: mongodb://127.0.0.1:27017/ci_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      - name: Syntax check every JS file
+        run: |
+          git ls-files '*.js' ':!:node_modules' ':!:public/**' ':!:static/**' ':!:navbar-app/**' ':!:font-awesome/**' \
+            | xargs -n 50 -I{} sh -c 'node --check "{}"'
+
+      - name: CropGuard tests
+        run: npm run test:cropguard
+
+      - name: Developer platform tests
+        run: npm run test:platform
+
+      - name: Security self-pentest + payment failure paths
+        run: npm run test:security
+
+      # Report-only until the major upgrades listed in PRODUCTION_AUDIT.md are done;
+      # make it blocking (remove continue-on-error) once the critical count is zero.
+      - name: npm audit (production deps)
+        run: npm audit --omit=dev --audit-level=critical
+        continue-on-error: true

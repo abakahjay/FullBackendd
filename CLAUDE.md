@@ -43,11 +43,20 @@ routes, meals) are deliberately mounted *before* `bodyParser`/`express.json()` b
 bodies for file uploads — be careful about where new upload-handling routes are mounted relative to the body
 parsers around app.js:110-140.
 
-**Auth**: JWT-based (`middleware/auth.js`), checking `Authorization: Bearer <token>` header, then a `token`
-cookie, then a `?oven=` query param, in that priority order. Verified against `JWT_SECRET`; attaches
-`req.user = { userId, username, token }`. Clerk (`@clerk/clerk-sdk-node`) is also wired in for specific flows.
-`middleware/adminOnly.js` gates admin-only routes; `middleware/htmlAuth.js` gates the server-rendered static
-dashboard pages (`/afrodatadashboard`, `/api/v1/bundle/`, `/api/v1/buydata/`).
+**Auth**: JWT-based (`middleware/auth.js`), checking the `Authorization: Bearer <token>` header, then the `token`
+cookie (`?oven=` only when `ALLOW_QUERY_TOKEN=true`). Verified against `JWT_SECRET` with `algorithms: ['HS256']`
+pinned (do the same on every new `jwt.verify`); attaches `req.user = { userId, username, role, token }` with the role
+read from the DB. Route style for the shared User: `router.get('/x', authMiddleware, adminOnly, handler)`
+(`middleware/adminOnly.js`); for other roles `requireRole('admin', 'caterer')` from `middleware/auth.js` (same shape
+as `cleanbridgeAuth`'s). `optionalAuth` lets anonymous requests through but rejects a bad token (demo shop).
+`middleware/writeGuard.js` is a mount-level guard: reads public, writes need a token/role, owner field forced from the
+token (used for meals, feedback, UniServe in app.js). `User`'s `toJSON` drops password, tokens and reset fields, so a
+populated user can never leak them; still select public fields on populates. Clerk (`@clerk/clerk-sdk-node`) is also
+wired in for specific flows. `middleware/htmlAuth.js` gates the server-rendered static dashboard pages
+(`/afrodatadashboard`, `/api/v1/bundle/`, `/api/v1/buydata/`); their `fetch` calls are same-origin, so the `token`
+cookie authenticates them. Escape server data with their `esc()` before `innerHTML`.
+
+**Admins (shared User)**: `node --env-file .env scripts/makeNsoroAdmin.js <username or email> [more ...]`.
 
 **Google OAuth is multi-app by design** (`utils/passport.js`, `routes/googleAuth.js`, `utils/oauthRedirect.js`):
 there is one shared Google Cloud OAuth client for the whole backend, with one callback URL registered in
@@ -568,35 +577,46 @@ The FullBackendd API is shared by many live apps (Nsoro, GH-GPT, CleanBridge, Se
 
 ## Production hardening — continue here (started 2026-11-26)
 
-Branch `hardening/production-ready` (commit `bfcc792`), **not pushed yet** – push from your own terminal:
-`git push -u origin hardening/production-ready`, then open a PR into `main`. Full findings: `PRODUCTION_AUDIT.md`.
+Branch `hardening/production-ready`, **not pushed yet** – push from your own terminal:
+`git push -u origin hardening/production-ready` (never push the `archive/*` branches: they contain an old `.env`), then
+open a PR into `main`. Full findings with evidence: `PRODUCTION_AUDIT.md`.
 
-**Done on the branch**
-- `app.js`: `helmet` (no CSP, cross-origin resources allowed) and the global `/api` rate limiter now run **before every router** – the upload, AI, posts, stories, CropGuard, CODM and platform routers used to be mounted above them. The old limiter block further down was removed; don't re-add one there.
-- `app.js`: morgan uses a `:safe-url` token that redacts `oven`, `token`, `access_token`, `code` query params. Keep using it for any new logger.
-- `app.js`: `GET /healthz` → 200 `{status:'ok',db:'up'}` / 503 when Mongo is down. Point Render's health check and an uptime monitor at it.
-- `app.js`: boot exits with code 1 if Mongo can't connect (PM2/Render restart it); graceful SIGTERM/SIGINT shutdown (10s hard stop); `unhandledRejection` is logged.
-- `app.js`: `/api/chat` reads `PYTHON_BIN` (default is still the old Windows anaconda path).
-- `db/connect.js`: `poolSize` (`MONGO_POOL_SIZE`, default 20), `serverSelectionTimeoutMS` (`MONGO_SERVER_SELECTION_MS`, default 10000), `socketTimeoutMS` 45000.
-- `middleware/auth.js`: removed the per-request "Token verified" log.
-- Indexes added: Posts, Comments, FoodOrders, Token, UserOrder, UssdSession, SeedBridgeProduce, FoodFeedback (Mongo builds them on first boot).
+**Tests** (59, all green 2026-11-26; CI runs them on every push via `.github/workflows/ci.yml`):
+`CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/x_test npm run test:security` (self-pentest + Paystack webhook failure
+paths in `test/security/`), `test:cropguard`, `test:platform`. No local Mongo: `npm i mongodb-memory-server` in a folder
+outside this repo and start `MongoMemoryServer.create({ instance: { port: 27017 } })`. Add a test to `test/security/`
+for every new security fix and mark it "verified" in the audit.
 
-**Verify before merging**: `npm start`, open `/healthz`, upload a Nsoro post image (cross-origin media must still load), log in on one frontend, place a CODM/SeedBridge test payment.
+**Done**
+- Ordering/ops (`bfcc792`): helmet + `/api` limiter before every router (don't re-add one further down); `:safe-url`
+  morgan token; Mongo pool/timeouts; `/healthz`; exit(1) when Mongo is down at boot; graceful SIGTERM; `PYTHON_BIN`; indexes.
+- `/readyz` (Mongo ping, 503 while shutting down), `utils/checkEnv.js` at boot, `uncaughtException` → graceful exit,
+  `ecosystem.config.js` (PM2 `max_memory_restart`), CI workflow.
+- Critical data leak fixed: public posts used to return password hashes and login tokens (`User` `toJSON`, `POST_USER_FIELDS`).
+- Access control: cart/orders (`utils/shop.js` ownership, anonymous demo cart kept), AFA + MTN orders (`adminOnly`; dashboard
+  uses the cookie), food orders / meals / feedback / UniServe (user from the token, roles). Stored XSS in
+  `static/afrodata.html` / `dashboard.html` escaped. HS256 pinned everywhere; `?oven=` off. N+1 cart pricing, the
+  load-every-order checkout, frozen `Date.now()` defaults and delivery dates fixed. Lists capped/paginated.
+- Removed `crypto`, `https`, `stream`, `buffer`, `logger`, `rate-limiter` deps and the dead `foodmiddleware.js`;
+  `npm audit fix` (90 → 64 advisories).
+- The old `../FullBackendd-master` clone was merged in and deleted: its branches are `archive/old-history-abakahjayy`,
+  `archive/abakahjayy-old-master`, `archive/abakahjayy-old-portfolio-integration`; `AGENTS.md` (Codex copy of this file)
+  and `misc/josephine.py` came from it. `node_modules` used to be a symlink into that folder; it is a real install now.
 
-**Next, in this order** (each needs a frontend check first – see the "keep every app working" rule above)
-1. 🔴 Cart/Orders IDOR: `routes/cart.js`, `routes/orders.js` have no auth; `GET /api/v1/cart` and `/orders` return everyone's data, and any id can be PATCHed/DELETEd. Add `authMiddleware`, filter by `req.user.userId`, update the shop frontend in `React-products-master` to send the token.
-2. 🔴 Same check for `/api/v1/delivery`, `/api/v1/ordersdata`, `/api/v1/afa` list, `/api/v1/foodorders` admin lists → `adminOnly` or owner filter.
-3. 🟠 Re-enable `isAllowedRedirectUri()` for Google OAuth with `ALLOWED_REDIRECT_DOMAINS` (currently any `redirect_uri` gets the token).
-4. 🟠 Drop the `?oven=` token from `middleware/auth.js` once the static pages use the cookie/header.
-5. 🟡 Paginate list endpoints (`postController.getAllPosts`, carts, orders, food orders, UniServe) with `?page=&limit=` max 100.
-6. 🟡 `controllers/orders.js` `createOrders` loads every order to match `orderTime` → `findOne({ orderTime, createdBy })`.
-7. 🟡 Socket.IO `cors.origin: '*'` → reuse `utils/corsPolicy` origins.
-8. 🟢 Prune junk deps (`crypto`, `https`, `stream`, `buffer`, `logger`, `rate-limiter`, `xss-clean`), run `npm audit`.
-9. 🟢 `node --test` cases for payment failure paths (declined charge, duplicate/late Paystack webhook, refund funding).
-10. 🔴 Run the skill's **section B self-pentest** against a local/staging copy (never prod data or live payments): NoSQL injection, XSS, IDOR with two test users, JWT forgery (`alg:none`, edited payload), login brute force vs the limiter, 50 MB body, malicious uploads, `Origin: evil.example`, webhook replay. Save the scripts in `test/security/` and record "verified" in `PRODUCTION_AUDIT.md`.
-11. 🟠 Validate env at boot (fail if `JWT_SECRET` < 32 chars or `MONGO_URI` missing); add `/readyz`; set PM2 `max_memory_restart`.
-12. 🟠 Daily MongoDB Atlas backups with a **tested** restore; Sentry (or similar) for errors; uptime monitor on `/healthz`.
-13. 🟡 CI (GitHub Actions): `npm ci --legacy-peer-deps`, `node --check`, `npm run test:cropguard`, `npm run test:platform`, `npm audit --omit=dev`; deploy to Render only from green `main`.
-14. 🟡 Before scaling past one Render instance: move rate-limit counters and Socket.IO to Redis (`rate-limit-redis`, `@socket.io/redis-adapter`); GridFS is already shared.
+**Verify before merging**: `npm ci --legacy-peer-deps`, `npm start`, `/healthz` + `/readyz`; admin dashboard
+(`/afrodatadashboard`) loads AFA + orders as an admin; Nsoro Explore + post upload; Amazon demo add-to-cart → order.
+
+**Next** (owner decisions first; details in PRODUCTION_AUDIT.md "Needs your decision")
+1. 🔴 Rotate `JWT_SECRET` to 48 random bytes (it is 17 chars; signs everyone out), then `REQUIRE_STRONG_SECRETS=true`.
+   Rotate the keys that were in git history.
+2. 🔴 Promote the admin accounts (`scripts/makeNsoroAdmin.js`, see Auth above) – needs the owner to run it against Atlas.
+3. 🟠 Major upgrades, one PR each with the tests: sharp, nodemailer, validator, multer, express-fileupload, then mongoose 5 → 8.
+   Then make the CI `npm audit` step blocking.
+4. 🟠 Google OAuth `redirect_uri` allow-list (kept open by the owner's choice so far).
+5. 🟠 `adminOnly` → 403 instead of 401 (check Nsoro's 401 interceptor first).
+6. 🟠 Atlas daily backups + a **tested** restore; Sentry; UptimeRobot on `/readyz`; Render health check on `/healthz`.
+7. 🟡 Login for the Amazon demo shop (then its carts become per-user automatically).
+8. 🟡 BullMQ + Redis for AI/sharp/Excel/email jobs; Redis for rate limits and Socket.IO before a second instance.
+9. 🟢 Pin Node (`engines`/`.nvmrc`) to the version Render runs now.
 
 Other projects in `Desktop/VS Projects` have **not** been audited yet; run `/production-ready-app` in each (CODM, CleanBridge-GH, JayRouter, helpdesk-main, ghanacropguard-ai, GHGPT-main, React-products-master, …).

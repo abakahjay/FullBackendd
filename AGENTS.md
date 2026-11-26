@@ -1,0 +1,622 @@
+# AGENTS.md
+
+This file provides guidance to Codex when working with code in this repository. It is a copy of CLAUDE.md; keep the two in sync.
+
+## What this is
+
+A single monolithic Node.js/Express backend ("openlabs-project") that serves a large number of unrelated
+feature domains behind one Express app: e-commerce (products/cart/orders/delivery), a mobile-data/airtime
+reseller (MTN bundles, AFA, Reloadly, USSD, Paystack), a food-ordering service (meals/foodorders/feedback),
+a chatbot/AI layer (OpenAI + a separate Python FastAPI service), social features (posts/comments/messages via
+Socket.IO), a portfolio-site contact/order form, and several static HTML "mini apps" served straight out of
+`static/`/`public/`. There is no monorepo tooling — it's one Express app with many route groups mounted under
+`/api/v1/*`.
+
+## Commands
+
+- Install: `npm install --legacy-peer-deps` (required — dependency tree has peer conflicts, notably
+  `mongoose@5.x` alongside `mongodb@5.x` via `resolutions`).
+- Run the server: `npm start` (nodemon with `--env-file .env`) or `node app.js`. Default port `7004`
+  (`PORT` env var). If the port is stuck: `npx kill-port 7004`.
+- Run the AI FastAPI microservice (separate from the Node server, used by `chatbot/aiModel.js`):
+  `cd chatbot && uvicorn serveai_fastapi:app --host 0.0.0.0 --port 5001 --reload`.
+- Regenerate the Markdown API reference: `npm run docs` while the server runs (saves `/api-docs.json` to
+  `oas-docs/openapi.json`, then widdershins writes `API.md`).
+- There is no working automated test suite — `npm test` is a stub (`package.json` scripts.test just exits 1).
+  `jest` and `cypress` are listed as dependencies but there is no jest/cypress config or spec files; `test/`
+  contains standalone Python scripts (`main.py`, `myphone.py`), not an integration test harness. Don't assume
+  `npm test` verifies anything — validate changes by exercising the relevant route(s) directly (e.g. via the
+  Swagger UI at `/api-docs` or a REST client) instead.
+
+## Architecture
+
+**Layering**: `app.js` → `routes/*.js` → `controllers/*.js` → `models/*.js` (Mongoose schemas). Routes only
+wire HTTP verbs/paths to controller functions and middleware; business logic and DB access live in
+controllers. Shared logic (JWT, email, hashing, permission checks) lives in `utils/`, reusable across
+controllers via `utils/index.js`.
+
+**Route mounting** (`app.js`): every feature area is mounted at its own `/api/v1/<name>` prefix (see the long
+list of `app.use('/api/v1/...', ...)` calls). When adding a new feature, follow the same pattern: a router in
+`routes/`, a controller in `controllers/`, a model in `models/` if it needs persistence, then mount it in
+`app.js`. A few routers (`uploadRoutes`, `testing1Router`, `userProfilePic`, `postRoutes`, AI image/model
+routes, meals) are deliberately mounted *before* `bodyParser`/`express.json()` because they need raw/multipart
+bodies for file uploads — be careful about where new upload-handling routes are mounted relative to the body
+parsers around app.js:110-140.
+
+**Auth**: JWT-based (`middleware/auth.js`), checking the `Authorization: Bearer <token>` header, then the `token`
+cookie (`?oven=` only when `ALLOW_QUERY_TOKEN=true`). Verified against `JWT_SECRET` with `algorithms: ['HS256']`
+pinned (do the same on every new `jwt.verify`); attaches `req.user = { userId, username, role, token }` with the role
+read from the DB. Route style for the shared User: `router.get('/x', authMiddleware, adminOnly, handler)`
+(`middleware/adminOnly.js`); for other roles `requireRole('admin', 'caterer')` from `middleware/auth.js` (same shape
+as `cleanbridgeAuth`'s). `optionalAuth` lets anonymous requests through but rejects a bad token (demo shop).
+`middleware/writeGuard.js` is a mount-level guard: reads public, writes need a token/role, owner field forced from the
+token (used for meals, feedback, UniServe in app.js). `User`'s `toJSON` drops password, tokens and reset fields, so a
+populated user can never leak them; still select public fields on populates. Clerk (`@clerk/clerk-sdk-node`) is also
+wired in for specific flows. `middleware/htmlAuth.js` gates the server-rendered static dashboard pages
+(`/afrodatadashboard`, `/api/v1/bundle/`, `/api/v1/buydata/`); their `fetch` calls are same-origin, so the `token`
+cookie authenticates them. Escape server data with their `esc()` before `innerHTML`.
+
+**Admins (shared User)**: `node --env-file .env scripts/makeNsoroAdmin.js <username or email> [more ...]`.
+
+**Google OAuth is multi-app by design** (`utils/passport.js`, `routes/googleAuth.js`, `utils/oauthRedirect.js`):
+there is one shared Google Cloud OAuth client for the whole backend, with one callback URL registered in
+Google Cloud Console (`CALLBACK_URL`, resolved to an absolute URL against the incoming request by
+passport-oauth2). Any frontend can start a login by hitting `GET /api/v1/auth/google?redirect_uri=<its own
+callback URL>` — no per-app registration step and no `.env` edit is needed. The `redirect_uri` travels through
+Google's `state` param (`encodeOAuthState`/`decodeOAuthState`) and, after the callback issues a JWT, the user
+is redirected back to that exact `redirect_uri` with `?token=<jwt>` appended. If a caller omits `redirect_uri`,
+it falls back to `${REDIRECT_URL}/auth/callback` for backwards compatibility with the original single-app
+integration.
+
+Validation is `isWellFormedHttpUrl()` (`utils/oauthRedirect.js`), which only checks the value is a well-formed
+http(s) URL — **not** which host it points at. This is a deliberate, explicit tradeoff (any site works
+automatically, no `ALLOWED_REDIRECT_DOMAINS` entry needed) that accepts a real open-redirect risk: a crafted
+`/auth/google?redirect_uri=https://attacker.example` link will send a genuine login token to attacker.example
+after a real Google login. `ALLOWED_REDIRECT_DOMAINS` and the stricter `isAllowedRedirectUri()` still exist but
+no longer gate Google auth — they now only protect `controllers/seedbridgePayment.js`'s payment callback
+redirect, which is unrelated and was deliberately left unchanged.
+
+**Errors**: custom error classes in `errors/` (`BadRequestError`, `NotFoundError`, `UnauthenticatedError`,
+`UnauthorizedError`, all extending `CustomAPIError`) are thrown from controllers/middleware — routes rely on
+`express-async-errors` so async controllers don't need manual try/catch/next. Everything funnels into
+`middleware/error-handler.js`, which also special-cases Mongoose `ValidationError`, duplicate-key errors
+(code `11000`), and `CastError` into consistent `{ msg, error }` JSON responses. `middleware/not-found.js`
+handles unmatched routes. Both are registered last in `app.js`.
+
+**Database**: MongoDB via Mongoose (`db/connect.js`, connects using `MONGO_URI`). Mongoose is pinned to v5,
+so newer Mongoose 6+/7+ query/connection APIs are not available — check existing model/controller code for
+the supported syntax (e.g. `useFindAndModify`, `useCreateIndex` are still set explicitly in `connect.js`).
+
+**Real-time**: Socket.IO is initialized on top of the same HTTP server (`http.createServer(app)` in `app.js`)
+and configured in `utils/socket.js`; used for the messaging feature (`routes/messageRoutes.js`,
+`models/Message.js`). Every connection is authenticated via `io.use()` middleware that verifies the same JWT
+issued by `POST /api/v1/auth/login` (passed as `io(url, { auth: { token } })` on the client) — `socket.userId`
+comes only from the verified token, never from a client-supplied field, so a socket can't send or read
+messages as a different user. `utils/socket.js` tracks `userId -> Set<socketId>` (not a single id) so a user
+with multiple tabs/devices gets delivery to all of them, and disconnecting one tab can't clobber another
+still-live tab's registration. `typing` events are emitted only to the named recipient's sockets, not
+broadcast to everyone connected. The REST endpoints in `routes/messageRoutes.js` require the same
+`authMiddleware` as everything else and independently enforce the same rule — `getMessages`/`markAsRead` 401
+for anyone who isn't a participant in that conversation. The socket's `sendMessage` accepts an optional
+ack callback, which receives `{ message }` (the saved doc) or `{ error }`. `GET /api/v1/messages/conversations`
+returns the caller's inbox: one row per other user with their public fields, the last message and an unread
+count. `PATCH /api/v1/messages/conversations/:otherUserId/read` marks that conversation as read.
+`React-products-master/React-products-master/Nsoro` is the frontend that uses all of this (`useChat`/`useConversations`).
+`ChatAppDemo.jsx` in `GHGPT-main` is still an old, unauthenticated mock.
+
+**Post media (GridFS)**: posts store an image or video in the `uploads` GridFS bucket. `Posts.mediaType` is
+`'image'` or `'video'` and is set from the upload's mimetype. `POST /api/v1/posts` goes through
+`postUpload('file')` (`utils/storageMulter.js`), which only accepts image or video files, caps them at 50 MB,
+and turns multer errors into 400s. `GET /api/v1/posts/media/:id` streams files inline with HTTP Range / 206
+support, which `<video>` needs for seeking; the older `/posts/image/:id` has no Range support.
+`storageMulter.js` overrides `storage._removeFile`, because multer-gridfs-storage calls
+`bucket.delete(id, cb)` and the mongodb v5 driver pinned in `resolutions` ignores callbacks. Without the
+override, any aborted upload hangs the request forever and leaves the partial file behind. Keep the override
+if you touch that file.
+
+**Nsoro social features**: `utils/socialNotify.js` `notify()`/`unnotify()` write `models/SocialNotification.js`
+(like/comment/follow, no self-notifications, one row per actor for like/follow) and push a `notification` socket
+event through `utils/socket.js` `emitToUserId`. They are called from `likePosts`/`unlikePosts`, `addComment` and
+`followUser`/`unfollowUser`, and never throw. `GET /api/v1/notifications` and `PATCH /api/v1/notifications/read`
+need auth. Other routes: `GET /users/search?q=` (regex-escaped, must stay above `/users/:id`), `GET /posts/liked/:id`,
+and `GET /posts/saved` plus `PATCH /posts/:postId/save` (auth; `User.saved` holds Posts ids, whereas `User.posts`
+holds GridFS file ids). `getUser`, `getUserByName` and `getAllUsers` strip password, tokens and reset fields,
+including on populated followers and following. `scripts/backfillPostMediaType.js` repairs `Posts.mediaType` for
+posts uploaded before it was recorded.
+
+**Nsoro moments (stories)** (`/api/v1/stories`, all auth, mounted next to posts because uploads are multipart): stories go into the
+same `uploads` GridFS bucket through `postUpload` and are served by `/posts/media/:fileId`. They expire after 24h.
+`purgeExpired()` runs on every feed read and deletes the Story doc and its file. A TTL index was deliberately not used,
+because it would orphan the GridFS file. The feed groups stories by author (you first, then unseen, then most recent).
+Views are `$addToSet` and exclude the owner, and only the owner can list viewers or delete. `GET /posts/:postId` must stay
+the last route in `postRoute.js`.
+
+**Nsoro end-to-end encrypted DMs**: `models/E2eDevice.js` holds each device's public key (`PUT /api/v1/messages/keys`, `GET /api/v1/messages/keys/:userId`, at most 10 per user). Text and voice messages may carry `Message.e2e`, an envelope built on the device (see Nsoro `src/utils/e2e.js`). `utils/e2e.js` `cleanEnvelope()` only checks its shape and size, used by REST send/edit, the voice upload and the socket `sendMessage`. When it's set, `message` is saved empty and the voice file is stored encrypted. The server can't read either, so never add features that need message text on the server (previews in pushes or emails, search). Old plain messages still work.
+
+**Nsoro email + DM extras**:
+- `utils/nsoroMail.js` `sendNsoroEmail()` follows the same rules as cleanbridgeMail: one-click unsubscribe (purpose `nsoro-unsubscribe`; `NSORO_PUBLIC_URL` sets the site address) and links pointing at the live site, never localhost. It respects `User.emailNotifications` and never throws. `throttle` limits it to one email per recipient per kind every 15 minutes, tracked in memory.
+- `socialNotify` emails follows and comments; likes stay in-app only. `emailNewMessage` only emails when the recipient has no connected socket (`isUserOnline`).
+- `/api/v1/nsoro` covers unsubscribe (a GET page, then POST), `PATCH /settings/email`, and `POST /updates` (admin broadcast, at most 90 per call because of the Gmail relay's daily limit).
+- Voice notes (`routes/messageVoiceRoute.js`) are mounted early in app.js because the global `express-fileupload` would otherwise eat the multipart body. This applies to any new upload route: `postUpload(field, { accept, maxBytes, kind })` must run before `app.use(fileUpload())`.
+- Edit and delete are sender-only. They emit `messageUpdated` and `messageDeleted` to both people, and delete also removes the audio file from GridFS.
+
+**Nsoro feed and account deletion**: `GET /api/v1/nsoro/feed` (`utils/nsoroFeed.js`) ranks every post for the signed-in user: freshness (halves about every 36 h), stars + 2× comments (log scale), people they follow (×1.6) or star/comment on, their own post from the last hour on top, a small per-person daily shuffle, and no poster twice in a row; `?kind=video` for the Watch page. Everyone gets every post. `DELETE /api/v1/nsoro/me { confirm: "<username>" }` (`utils/deleteAccount.js`) deletes the shared account (Nsoro **and** GH-GPT) and everything about it: posts and their files, comments by them and on their posts, their stars, follower/following/saved entries, notifications, all their messages (and voice notes), moments and views, E2E devices, push subscriptions, tokens, GH-GPT chats, chat list, images and files. Both were tested against an in-memory MongoDB.
+
+**Nsoro logged-in social API** (`/api/v1/nsoro`, controllers/nsoroSocialController.js). Both its routers (routes/nsoroRoutes.js, routes/nsoroUploadRoutes.js) are mounted at `/api/v1/nsoro`. User fields: `nsoroWelcomedAt`, `nsoroDevices`. Nothing in the code or the API uses the app's old name any more; keep it that way.
+
+These routes are versions of post create/delete, like/unlike, comments, follow/unfollow and profile edit/photo that take the user from the JWT and check ownership. They reuse the original handlers by overwriting `req.body.userId` / `req.query.userId` / `req.params.id` with the token's user.
+- Uploads (`POST /posts`, `PATCH /me/photo`) are in routes/nsoroUploadRoutes.js, mounted before express-fileupload.
+- The original open routes (`/api/v1/posts`, `/users/:id/follow`, `/comments`...) are deliberately unchanged: GHGPT-main's Chatbot still calls them without a token. Lock them only once no client uses them.
+
+**Mongoose defaults**: write `default: Date.now` (the function), never `Date.now()`, which is evaluated once
+at startup. `models/Message.js` had that bug, which gave every message the server's start time.
+
+**AI/chatbot**: Two separate integrations exist side by side — (1) `utils/openaiService.js` /
+`utils/askAi.js` call OpenAI/OpenRouter directly from Node for `routes/chatAi.js` and `routes/aiModel.js`; (2)
+`chatbot/` is an independent Python project (FastAPI + a from-scratch intents/finetune pipeline) that must be
+run as its own process (see Commands above) and is called out to from `chatbot/aiModel.js`. Also note `app.js`
+has a legacy `/api/chat` route that `spawn()`s a hardcoded local Python interpreter path to run
+`chatbot/respond.py` — this is environment-specific and likely broken outside the original dev machine.
+
+**API docs**: `/api-docs` (Swagger UI) and `/api-docs.json` list EVERY route, built live from the Express router
+on first request by `utils/apiDocs.js` - nothing to regenerate when routes change. It reads each route's auth
+middleware (`requireRole` guards carry `.roles`) and the controller's source for body/query fields.
+`utils/keepOriginalHandlers.js` (required right after `express-async-errors`) keeps the original handler on
+`handler.original`, because express-async-errors wraps every handler in an anonymous `newFn`. Labels,
+descriptions and examples go in `docs/apiAnnotations.js` (key `"METHOD /full/path"`); real CleanBridge
+examples are recorded into `docs/apiExamples.json` by `scripts/captureApiExamples.js`, which must run against a
+throwaway `*_docs_tmp` database (see the file header) so no real user data reaches the public docs. The
+hand-written `swagger.yaml` is still served at `/api-docs/portfolio`.
+
+**Static/legacy front-ends**: `static/` and `public/` contain several plain HTML/CSS/JS mini-apps (MTN data
+bundle dashboard/login/buydata pages, success/reset-password pages) served directly by Express routes in
+`app.js`, gated by `htmlAuth` where noted above. `navbar-app/` is a small standalone JS widget. These are not
+part of the JSON API and don't go through the `routes/`→`controllers/` layering.
+
+**Environment variables**: `.env.example` is the source of truth for which keys every environment must define
+(local/staging/prod) — copy it to `.env` and fill in real values; add new keys to both files together so
+environments stay in sync. Vars actually read via `process.env.*` in code: `MONGO_URI`, `PORT`, `JWT_SECRET`,
+`JWT_LIFETIME`, `SESSION_KEY`, `NODE_ENV`, `ORIGIN`, `CLIENT_URL_AI`, `CALLBACK_URL`, `REDIRECT_URL`,
+`ALLOWED_REDIRECT_DOMAINS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `EMAIL_USER`, `EMAIL_PASS`,
+`IMAGE_KIT_PUBLIC_KEY`, `IMAGE_KIT_PRIVATE_KEY`, `IMAGE_KIT_ENDPOINT`, `OPENAI_API_KEYS`,
+`OPENROUTER_API_KEY`, `PAYSTACK_SECRET_KEY`, `TEST_PAYSTACK_SECRET_KEY`, `PAYSTACK_CALLBACK_URL`,
+`RELOADLY_CLIENT_ID`, `RELOADLY_CLIENT_SECRET`, `SEEDBRIDGE_CLIENT_URL`.
+
+> ⚠️ `.env` was committed to this repo until this was caught and fixed (untracked with `git rm --cached`,
+> `.gitignore` corrected from the no-op `.env/` to `.env`). It holds live secrets (Paystack live secret key,
+> OpenAI key, Reloadly, Clerk, email app password, etc) that are still in git history from before the fix —
+> treat those as already exposed if this repo/remote has ever been public or shared, and get the user's
+> explicit go-ahead before rotating keys or rewriting history — don't do it unilaterally.
+
+## GH-GPT (`/api/v1/ghgpt/*`)
+
+Backend for the GH-GPT chatbot (frontend: `Desktop/VS Projects/GHGPT-main/GHGPT-main/Chatbot`, repo abakahjay/GHGPT,
+live at https://gh-gpt.onrender.com). It uses the shared `User` model and the chat models `ChatAi` (history of
+`{ role: 'user'|'model', parts: [{ text }], img? }`) and `UserChatAi` (per-user list of `{ chatId, title, pinned, createdAt }`).
+All `/api/v1/ghgpt` routes take the user from the JWT and only touch that user's chats; the older `/api/v1/ai/*`
+routes (userId in the URL, no auth) are kept for existing clients.
+- **AI** (`utils/ghgptAi.js`): `streamChat()` tries these in order:
+  1. `OPENROUTER_MODEL`, only if it's set (e.g. a paid model once the account has credits)
+  2. Gemini (`GEMINI_API_KEY`, free tier, reads images)
+  3. free OpenRouter models (`openrouter/free`, gemma, qwen…; override the list with `GHGPT_OPENROUTER_FREE_MODELS`)
+  4. OpenAI
+  5. Pollinations (free, keyless, text-only; `GHGPT_FREE_FALLBACK=false` disables it)
+
+  Free OpenRouter models are shared and often return 429, so several are tried. The account had $0 credits, so
+  the old hardcoded paid model is no longer the default. A provider that fails with 401/403 is skipped until the
+  server restarts. OpenRouter answers a revoked key with **401 "User not found."**, which isn't a GH-GPT user problem.
+  `buildMessages()` builds the context from the system prompt (which includes the ```chart JSON format the frontend
+  draws), the custom instructions, the last 20 messages and any attached document text. `utils/askAi.js`
+  (`POST /api/v1/ai/ask`) uses the same chain.
+- **Documents**: `POST /files` (routes/ghgptUploadRoutes.js, multer memory storage, 20 MB). `utils/ghgptFiles.js`
+  extracts the text:
+  - PDF: pdf-parse, loaded from `pdf-parse/lib/pdf-parse.js` to skip its self-test
+  - Word: mammoth
+  - Excel: exceljs
+  - PowerPoint: jszip
+  - anything else: read as plain text
+
+  The original goes into GridFS and the text into a `models/GhgptFile` doc. The stream takes `fileIds`, and the user
+  message keeps `attachments` and `docText` (ChatAi schema) so follow-up questions can use them.
+- **Images out** (`utils/ghgptImage.js`): `tool: 'image'` creates an image, and so does a prompt that matches
+  `wantsImage()` ("draw…", "create an image of…"). Images come from Pollinations (free, adds a watermark, 5-45 s,
+  retried 3×), or from the paid `GHGPT_IMAGE_MODEL` on OpenRouter if that's set. The file goes into GridFS and is
+  stored as `img` on the model message. The stream sends a `status` heartbeat every 15 s while it waits.
+- **Streaming**: `POST /chats/:chatId/stream` is Server-Sent Events (`token`… `done` {history} → optional `title`, or
+  `error`). Modes `send` / `regenerate` / `edit` (`editIndex` counts the `"."` placeholder a new chat starts with;
+  the controller removes the placeholder and shifts the index). A client disconnect aborts the AI call and saves the
+  partial answer (`_Response stopped._` if empty). New chats get an AI title after the first answer (`generateTitle`,
+  falling back to `heuristicTitle`). Images: `POST /uploads` (routes/ghgptUploadRoutes.js, mounted before
+  express-fileupload) stores to GridFS and returns `fileId`; the stream reads it back for vision models.
+- Also `PATCH /chats/:id/title`, `PATCH /chats/:id/pin`, `POST /chats/:id/email` (the transcript goes to the user's
+  own email, rate limited to 5 per 15 min).
+- **Email** (`utils/ghgptMail.js`, same rules as nsoroMail): `POST /events {type, deviceId}` sends the welcome
+  email the first time an account uses GH-GPT and a "new sign-in" alert for unknown devices (`ghgptWelcomedAt`,
+  `ghgptDevices`). GH-GPT has its own opt-out, `User.ghgptEmailNotifications` (`GET /settings`,
+  `PATCH /settings/email`, one-click `/email/unsubscribe`), so it doesn't switch off Nsoro emails. Security
+  alerts and requested transcripts use `force`.
+- `UserChatAi` used `default: Date.now()` (evaluated once at startup), so every chat got the server start time.
+  It's now `Date.now`; chats created before the fix keep their wrong dates.
+
+## Device notifications - Web Push (every app)
+
+`utils/push.js` + `models/PushSubscription.js` + `routes/push.js` (`/api/v1/push`).
+
+**Keys and routes**
+- VAPID keys come from `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` if set. Otherwise they're generated once and stored in MongoDB (`appsettings`, `_id: 'vapid'`), so every environment on the same database shares them with no setup. Changing the keys breaks every existing subscription.
+- `GET /public-key` (no auth).
+- `POST /subscribe` | `/unsubscribe` | `/test` with `{ app: 'ghgpt'|'nsoro' }`, using the shared User JWT.
+- `POST /ack { token }` (no auth) is the service worker's delivery receipt (utils/pushAck.js). It drives the two grey ticks and "Ringing…".
+- `/cleanbridge/subscribe` | `/unsubscribe` | `/test` use the CleanBridge JWT (`realm: 'cleanbridge'`).
+
+**Sending**
+- `pushToUser(userId, { title, body, url, tag }, { app, realm })` and `pushToAdmins(payload)` never throw.
+- Subscriptions that the push service answers with 404/410 are deleted.
+- `pushToAdmins` reaches admin accounts, the account whose email is `EMAIL_USER`, and `OWNER_ALERT_USERNAMES` (default `jayy`).
+
+**Where pushes come from**
+- `sendGhgptEmail` and `sendNsoroEmail` push the same news as the email, unless called with `push: false`.
+- `socialNotify` pushes every like, comment and follow, and every DM through `emailNewMessage`.
+- CleanBridge `notify()` pushes every notification.
+- The portfolio contact and order forms push to the owner.
+- GH-GPT pushes "Your image is ready" when the user left before a generated image finished.
+
+**Clients**
+- Each frontend's service worker shows the notification. It skips it while the app is focused, except for `tag: 'test'`.
+- iPhone/iPad only allow web push for apps added to the Home Screen.
+
+## Security baseline (every app)
+
+- **CORS** (`utils/corsPolicy.js`): every origin may call the API (the apps use Bearer tokens), but `Access-Control-Allow-Credentials` is sent only for our own frontends: localhost, `ALLOWED_REDIRECT_DOMAINS`, the apps' client URLs, the known sites in `KNOWN_FRONTENDS` and `CORS_ORIGINS`. A new frontend that sends cookies (`credentials: "include"`, `withCredentials`) must be added to `CORS_ORIGINS`, or its cookie calls fail in the browser.
+- **`trust proxy`** is set when `RENDER` (or `TRUST_PROXY`) is present. Without it every visitor on Render has the proxy's IP, so every `express-rate-limit` limiter would be one shared bucket.
+- **Rate limits**: `/api/` overall per IP (`API_RATE_LIMIT_PER_15_MIN`, 3000); failed logins per IP and route (`middleware/authLimiter.js`, `LOGIN_FAILURES_PER_15_MIN`, 25; only failures count) on the shared, SeedBridge and CleanBridge logins and the shared `PATCH /api/v1/auth/:userId`; sign-ups per IP (`SIGNUPS_PER_HOUR`, 60). Ghana's mobile networks put many users behind one IP, so keep these generous. CropGuard has its own limiter.
+- The shared login answers "Invalid email or password." for both cases (no account enumeration). `POST /api/v1/auth/userId` never returns the password hash.
+- `express-fileupload` is capped (`MAX_UPLOAD_MB`, 50; 10 files) because it buffers in memory.
+- In production, unexpected 500s (no `statusCode` set by our code) answer a generic message; the real one is logged.
+- **Known open item, kept by the owner's choice**: the shared Google login (`GET /api/v1/auth/google` without `?app=`) accepts any `redirect_uri` (an open redirect for the login token; see the note in `routes/googleAuth.js`). CleanBridge and CropGuard use allowlisted redirects.
+
+## Email delivery (every app)
+
+All mail goes through `utils/mailTransport.js` `deliver()` (used by `utils/sendEmail.js` and `utils/cleanbridgeMail.js`).
+Render's free plan blocks outbound SMTP (Gmail SMTP fails with "Connection timeout"), so the provider is picked by env:
+`MAIL_RELAY_URL` + `MAIL_RELAY_SECRET` (Google Apps Script relay in `scripts/gmailRelay.gs`, sends from your Gmail over HTTPS),
+then `BREVO_API_KEY` (+ `BREVO_SENDER_EMAIL`), then `EMAIL_USER`/`EMAIL_PASS` SMTP (fine locally).
+CleanBridge email links use `emailUrl()` (`utils/cleanbridgeMail.js`): when `CLEANBRIDGE_CLIENT_URL` is a localhost
+address they point at the live site instead (override with `CLEANBRIDGE_PUBLIC_URL`); unsubscribe links always hit the
+server that sent the email.
+
+## CleanBridge place search
+
+`/geo/search` merges Photon/OpenStreetMap (streets, areas) with ~28k Ghanaian businesses and landmarks from the
+Overture Maps places dataset, kept in memory by `utils/ghanaPlaces.js` from `data/ghana-places.json.gz` (rebuild
+with `scripts/buildGhanaPlaces.js`). Without a user position it biases to Accra. `/geo/photos` gives an Esri
+satellite snapshot plus nearby Wikimedia Commons photos. Google Maps isn't used because it needs a billing account.
+Keep the "© Overture Maps Foundation" / OpenStreetMap / Esri credits visible in the UI (PlacePreview).
+
+## Forgot / reset password (every app)
+
+`utils/passwordReset.js` `createPasswordReset({ Model, appKey, appName, send, ... })` gives any user collection the
+same automatic flow. It is mounted for the shared `User` (`/api/v1/auth`), SeedBridge (`/api/v1/seedbridge/auth`) and
+CleanBridge (`/api/v1/cleanbridge/auth`):
+- `POST <base>/forgot-password { email, redirect_uri? }` emails a link immediately. With `redirect_uri` the link opens the
+  calling app's own reset page (`?token=&email=` appended). Without it, the link opens this backend's hosted page
+  `/resetPassword?app=<appKey>` (`static/resetPassword.html`, which picks the right API from `app`). `redirect_uri` must pass
+  `isAllowedRedirectUri` (ALLOWED_REDIRECT_DOMAINS). This is unlike Google login, because the reset link carries a secret.
+  CleanBridge defaults to its own `/reset-password` page and also trusts CLEANBRIDGE_CLIENT_URL.
+- `POST <base>/reset-password/:token?email= { newPassword }`. The token and email may also be sent in the body.
+- Tokens are 32 random bytes, stored only as SHA-256 hashes, and expire after 30 minutes; each can be used once.
+  The forgot endpoint gives the same answer for unknown emails, so it can't be used to find accounts. Errors are 400, never 401.
+- Rate limited per IP per app (`middleware/passwordResetLimiter.js`): 5 forgot and 20 reset attempts per 15 minutes.
+- To add another app: add `resetPasswordToken`/`resetPasswordExpires` to its model, create the handlers with its model
+  and mailer, and mount both routes with the limiters.
+
+## SeedBridge (`/api/v1/seedbridge/*`)
+
+A farm-to-market app (farmers list produce, buyers order it, drivers deliver it) living inside this same
+backend but **fully namespaced and isolated** from everything else here — it was originally built by mistake
+inside an old, no-longer-running copy of this repo (`openlabs-project-main`) before being ported in. Its own
+`models/SeedBridgeUser.js` (phone-first signup: `name`, `phone`, `password`, `role` of
+`farmer`/`buyer`/`driver`/`agent`, `region`, `momoBalance`) is a **separate collection** from the shared
+`User` model every other app on this backend uses — no shared schema, no shared auth. `middleware/seedbridgeAuth.js`
+verifies its own JWTs (still signed with the same `JWT_SECRET`, but a token minted for `User` won't resolve
+against `SeedBridgeUser` or vice versa). Sign up/log in at `POST /api/v1/seedbridge/auth/signup` /
+`/login` (phone + password, not email).
+
+Feature routes: `seedbridgeProduce.js` (public browsing + farmer-owned CRUD on listings, ownership enforced
+via `req.user.userId === produce.farmerId`), `seedbridgeOrder.js` (buyer creates an order against a listing,
+decrements `availableKg`, both sides can update status), `seedbridgeDashboard.js` (role-specific
+farmer/buyer/driver stats + a public market overview), `seedbridgeUssd.js` (a *different* USSD menu than the
+MTN-bundle one at `/api/v1/ussd/start` — looks users up by phone against `SeedBridgeUser`, no JWT involved,
+meant for Africa's Talking).
+
+**Payment is dynamic by design, unlike the legacy `/api/v1/paystack` flow**: `seedbridgePayment.js`'s
+`initializeCheckout` takes the caller's own `callbackUrl` per request (same `isAllowedRedirectUri()` /
+`ALLOWED_REDIRECT_DOMAINS` gate as Google login), falling back to `SEEDBRIDGE_CLIENT_URL` only when no
+`callbackUrl` was given — an explicitly-passed but disallowed URL is rejected with a 400, never silently
+swapped for the fallback. Also has real webhook support (`POST /api/v1/seedbridge/payments/webhook`,
+HMAC-SHA512 signature verification against `x-paystack-signature`), which the legacy Paystack integration
+lacks. This requires the **raw** request body to verify the signature, so `app.js` special-cases
+`SEEDBRIDGE_WEBHOOK_PATH` around every body-parsing/sanitizing middleware it registers (`bodyParser.json()`,
+`xss()`, `mongoSanitize()`, `express.json()`) — if you add another raw-body webhook anywhere in this app,
+follow that same exact-path-skip pattern or the signature check will always fail.
+
+`models/SeedBridgeLogisticsRequest.js` (driver pickup/delivery scheduling) exists as a model only — no
+controller/route was ever built for it in the source this was ported from.
+
+## CleanBridge GH (`/api/v1/cleanbridge/*`)
+
+Backend for the CleanBridge GH waste-collection frontend (separate repo: `Desktop/VS Projects/CleanBridge-GH`).
+It follows the same isolation pattern as SeedBridge. It has its own `models/CleanBridgeUser.js` collection (roles
+`customer`/`collector`/`admin`) and its own `middleware/cleanbridgeAuth.js`. Tokens carry an `app: "cleanbridge"` claim
+and the middleware rejects any token without it. `requireRole(...roles)` (exported from the same middleware)
+throws 403. Mounted groups are `auth`, `pickups`, `routes`, `vehicles`, `notifications`, `settings`, `dashboard`,
+`admin`, `geo`, `payments` and `payouts`, each with one `routes/cleanbridge<X>.js` and one `controllers/cleanbridge<X>.js`.
+Shared helpers are in `utils/cleanbridge.js` (DTO mappers that return `id`, never `_id`; `quotePickup`, `estimateFuel`,
+`collectorBalance`, and the atomic `nextSequence` behind `CB-1001`/`RT-0001` codes). Ghana reference data is in
+`utils/ghana.js` (service hubs, regions, phone/MoMo network detection, GhanaPost GPS and DVLA plate regexes,
+`serviceInfo(lat, lng)`). The frontend mirrors that file in `src/lib/ghana.js`, so keep the two in sync.
+
+Rules worth knowing before changing things:
+- **Return 400, not 401, for validation failures on signed-in requests.** The frontend treats any 401 as an
+  expired session and logs the user out. `UnauthenticatedError` is only for bad or missing credentials.
+- **Phones are Ghana mobiles**, normalised to `+233XXXXXXXXX` in CleanBridgeUser's `pre("validate")`. `phone` is
+  optional and sparse (Google sign-ups add it later), and `password` is optional when `googleId` is set.
+- **The price is always computed on the server.** `serviceInfo()` picks the nearest hub. The pickup is rejected if it
+  is outside every hub's `radiusKm` or outside Ghana. Road km = straight-line km × `ROAD_FACTOR`. The rules come from
+  `CleanBridgeSettings` (a singleton; `Settings.getGlobal()` creates it with defaults). `minimumFee` tops up
+  small jobs.
+- **Pickup status machine** (`TRANSITIONS` in `controllers/cleanbridgePickup.js`):
+  `requested → assigned → on_the_way → completed`, with `cancelled` allowed from any non-final state. Assignment
+  only happens via `/accept` (an atomic claim by a collector) or `/assign` (admin), and both require a **verified**
+  vehicle. On completion the earnings are snapshotted: `collectorEarning = price × payouts.collectorSharePct` and
+  `platformFee` is the rest. Cash jobs set `cashCollected` because the collector holds the money.
+- **Fees and extras** (all in `quotePickup`, all editable on the admin Pricing page): `serviceFee` on every visit,
+  `offHoursFee` for windows starting 06:00/16:00 (`isOffHoursWindow`), `carryFeePerFloor` × `floors` (no lift),
+  `binWashFee` when `binWash`. Settings docs created before these existed fall back to `FEE_DEFAULTS`.
+- **Recurring plans** (`models/CleanBridgeSubscription.js`, `/subscriptions`, `utils/cleanbridgePlans.js`): weekly or
+  monthly; `recurring.weeklyDiscountPct` / `monthlyDiscountPct` become a negative `planDiscount` fee line. Express is
+  never charged on plans. Each visit is an ordinary pickup (`subscriptionId`, `frequency`) booked through the shared
+  `bookPickup()` in the pickup controller: the first visit at creation, later ones `LEAD_DAYS` (2) ahead.
+  `bookDueVisits()` runs every 30 min and on plan/cluster listings (Render sleeps), claims `nextDate` atomically, and
+  skips visits missed while asleep rather than booking past dates. Dates are UTC midnight (Ghana is UTC+0). Pausing
+  or cancelling cancels upcoming visits that are not paid online.
+- **Area dispatch** (`controllers/cleanbridgeDispatch.js`, admin `GET /admin/dispatch/clusters?date=&radiusKm=`,
+  `POST /admin/dispatch`): groups the day's unassigned `requested` pickups around the densest seeds (max 25 stops),
+  suggests the smallest vehicle allowed for every load that fits the bags (`VEHICLE_INFO.capacityBags`), orders stops
+  nearest-neighbour from the hub and back, and lists suitable collectors by distance. Dispatch assigns each pickup
+  atomically (skipping ones taken meanwhile), refuses vehicles that are too small or the wrong class, and adds the
+  stops to the collector's `planned` route for that day or creates one. `serviceInfo().hub` has no coordinates; use
+  `SERVICE_HUBS` (`hubNear`).
+- **Collector balance** (`collectorBalance()`) = earnings − cash collected − paid or requested payouts. It can go
+  negative, which means the collector owes the platform fee on cash jobs. `CleanBridgePayout` has a partial unique
+  index that allows one open request per collector. Admins record MoMo payouts manually with the transaction
+  ID; nothing is sent automatically.
+- **Customer payments** (`controllers/cleanbridgePayment.js`) use Paystack hosted checkout (MoMo + card, GHS).
+  The payment is only marked paid after `/transaction/verify` confirms the amount, currency and `metadata.pickupId`.
+  There is no webhook yet. `callbackUrl` must pass `isAllowedRedirectUri`.
+- **Google sign-in** reuses the shared `routes/googleAuth.js` callback. `/api/v1/auth/google?app=cleanbridge&role=&redirect_uri=`
+  puts `app: "cleanbridge"` in the OAuth state, and the callback hands off to `cleanbridgeAuth.googleCallback`, which upserts
+  a CleanBridgeUser (linked by `googleId`, or by email) and redirects with `?token=`. Unlike the open shared flow, the
+  CleanBridge branch **does** enforce an allowlist: `ALLOWED_REDIRECT_DOMAINS` plus the host of `CLEANBRIDGE_CLIENT_URL` (`isAllowedCleanbridgeRedirect`).
+  The Google photo is saved as `googleAvatarUrl`. Uploaded avatars go to ImageKit (`PUT /auth/me/avatar`, multipart
+  field `avatar`, via express-fileupload's `req.files`) and take precedence over the Google photo.
+- **Geocoding** (`controllers/cleanbridgeGeo.js`) proxies Photon (OSM, built for autocomplete), falling back to
+  Nominatim. Both are limited to Ghana, cached in memory for 10 minutes and rate limited per IP.
+- Routes snapshot the fuel price and the vehicle's L/100km when created. Collectors' live GPS
+  (`PUT /auth/me/live-location`) counts as live for 10 minutes on the pickup page and 30 minutes on the admin map.
+- Aggregation pipelines need explicit `mongoose.Types.ObjectId(...)` casts (`find()` casts automatically,
+  `aggregate()` does not).
+
+## GhanaCropGuard AI (`/api/v1/cropguard/*`)
+
+Backend for GhanaCropGuard AI, which classifies a photo of a cashew, cassava, maize or tomato leaf into one of 22 CCMT classes. Its clients are a React + Vite web app and an Expo app (repo `Desktop/VS Projects/ghanacropguard-ai`, which also has the ML pipeline that produces the model). It replaced that repo's FastAPI backend and keeps the FastAPI API contract, so the clients only changed their base path. Results are a preliminary assessment, **not a diagnosis**; keep that framing in any text.
+
+**One router owns the whole namespace.** `routes/cropguard.js` is mounted in app.js **before** every global body parser, express-fileupload, xss-clean and mongo-sanitize, and it never calls `next()` past its own 404. So it does its own work:
+- security headers (`helmet`)
+- JSON (64 kb) and multipart (multer memory storage, `image` field, `CROPGUARD_MAX_UPLOAD_MB`) parsing
+- an error handler that answers `{ detail: { code, message, fields? } }`, the shape the clients expect (not `{ msg }`)
+
+Throw `fail(status, code, message)` (`utils/cropguard.js`). Validation goes through `Checker` and gives 422 `validation_error` with `fields[{ field, message }]`. Since there is no sanitizer in front, every input is type-checked before it reaches a query (`isStr`, explicit enums). The 401/400 rule matches the other apps: wrong current password and similar are 400; only `middleware/cropguardAuth.js` and failed login send 401.
+
+**Auth and isolation.**
+- Users are in `models/CropGuardUser.js` (email, `passwordHash` with bcrypt 12, role `user`/`admin`, `tokenVersion`, age/terms consent timestamps).
+- JWTs are `{ sub, role, tv, type: "access", app: "cropguard" }`, signed with the shared `JWT_SECRET`. They deliberately have no `userId` claim, so the shared `middleware/auth.js` cannot accept them, and `cropguardAuth` rejects any token without `app: "cropguard"` or whose `tv` is not the user's current `tokenVersion`.
+- Password change, password reset, `POST /auth/logout-all` and admin deactivation bump `tokenVersion`, which revokes every existing token.
+- Forgot/reset password is CropGuard's own (`forgotPassword`/`resetPassword` in `controllers/cropguardAuth.js`), not `utils/passwordReset.js`, because it needs the `{ detail }` errors, the 8-character letters+digits policy and session revocation. Same mechanics: generic answer, SHA-256-hashed 32-byte token, 30 min, single use. The link puts the token in the URL **fragment** (`<redirect_uri>#token=&email=`) so it never reaches a server log. Emails go through `utils/cropguardMail.js` → `utils/mailTransport.js`.
+- Google sign-in: `GET /api/v1/auth/google?app=cropguard&redirect_uri=&consent=1` in `routes/googleAuth.js`. The state is a signed 10-minute JWT (`purpose: "cropguard-oauth"`), so the consent flag and redirect can't be edited. A new Google account is only created with `consent=1` (the web sign-up page sends it after the boxes are ticked). An existing email is linked. `CROPGUARD_ADMIN_EMAILS` become admins through Google only. The token returns as `#token=`, errors as `#error=`. Google-only users have no `passwordHash`; they delete the account with `{ confirm: "DELETE" }` and add a password through forgot-password.
+- Redirects (Google, reset links) must pass `isAllowedRedirect()` (`utils/cropguard.js`): `ALLOWED_REDIRECT_DOMAINS` or the origin of `CROPGUARD_CLIENT_URL`.
+- Bearer header only, no cookies: the web app keeps the token in localStorage behind a strict CSP.
+- Rate limits use an in-process sliding window (`rateLimit()` in `utils/cropguard.js`): auth per IP, failed logins per email (10 per 15 min), predictions per user. The IP is the last `X-Forwarded-For` entry (Render appends the real client), because app.js does not set `trust proxy`.
+- Other users' records give 404, not 403.
+- Photos are served from a signed link: `GET /predictions/:id/image?sig=` with a 1 h JWT `{ pid, type: "image", app: "cropguard" }`, so `<img>` tags work without a header.
+
+**Model serving** (`utils/cropguardInference.js`). `onnxruntime-node` runs in this process on CPU. It is required lazily inside `Classifier.load`, so a platform without the native module loses only CropGuard predictions. Loading:
+- The bundle (`model.onnx` + `meta.json`) is read once when the router is first required, from `CROPGUARD_MODEL_DIR` (default `data/cropguard/model`).
+- `model.onnx` is checked against the sha256 in `meta.json`, and a warm-up run checks the output size against the class list.
+- If anything fails, the prediction routes answer **503 `model_unavailable`**, never a fake prediction, and `/health` reports `degraded`.
+
+Preprocessing (`utils/cropguardPreprocess.js`) is a line-for-line port of the ML repo's `cropguard_ml/preprocess.py`:
+- sharp only decodes (EXIF rotate, alpha dropped, sRGB).
+- The resize is Pillow's bicubic `resample.c` 8-bit path (fixed-point coefficients, horizontal then vertical pass).
+- Python's round-half-even is used for sizes and the crop offset.
+- Normalisation is done in float32.
+
+It matched Python bit for bit on CCMT photos and edge cases (odd sizes, RGBA, grayscale, EXIF orientation 6, WebP), so keep it in sync with `preprocess.py`; sharp's own resize is close but not identical. Package `onnxruntime-node` is pinned and intentionally not in `allowScripts`: its postinstall only downloads optional CUDA binaries, and the CPU binaries are bundled.
+
+**Data.**
+- `CropGuardPrediction` stores failed requests too (`status: "failed"`, `errorCode`), for the admin statistics.
+- `CropGuardModelVersion` is upserted for the loaded bundle at startup. It keeps `metaJson` as text because `meta.json` has keys with dots.
+- `CropGuardAuditEvent` records registrations, password changes, deletions and admin changes.
+- Photos are re-encoded to JPEG (EXIF/GPS dropped, at most 1024 px on the short side) into the GridFS bucket `cropguardImages`, not the shared `uploads` bucket.
+- `purgeExpired()` deletes unsaved photos older than `CROPGUARD_RETENTION_DAYS`, at startup and every 24 h.
+- Startup tasks (model version, `CROPGUARD_BOOTSTRAP_ADMIN_EMAIL/PASSWORD`, retention) run on `mongoose.connection` `open` and never throw.
+
+**Content.** `data/cropguard/content.json` holds the class list, guidance text, sources, warning texts, the disclaimer, regions and the policy defaults. It was generated from the old Python backend and is now the source of truth. Its rules are in the ML repo's `docs/CONTENT_POLICY.md`: visible signs and field hygiene only, no pesticide names or doses, real organisations only, and refer chemical decisions to a MoFA extension officer. `test/cropguard/unit.test.js` enforces them. If the ML repo's `labels.py` changes, update `classes` here too.
+
+**Tests**: `npm run test:cropguard` (node:test).
+- `test/cropguard/api.test.js` starts the real `app.js` as a child process and calls it over HTTP. It refuses to run unless `CROPGUARD_TEST_MONGO_URI` is a local MongoDB whose database name ends in `_test` or `_tmp`. `mongodb-memory-server` run outside this repo works.
+- It uses `test/cropguard/tiny-model/`, a real 562-byte ONNX graph: mostly green → `cassava_mosaic`, mostly red → `cashew_red_rust`.
+- It also checks that CleanBridge still answers with `{ msg }` and that `/api-docs.json` still lists every app.
+- Admin CLI: `node scripts/cropguardCreateAdmin.js <email>` (prompts for the password).
+
+## CODM Campus Showdown (`/api/v1/codm/*`)
+
+Backend for the UMaT Call of Duty: Mobile tournament site (React + Vite frontend in `Desktop/VS Projects/CODM`).
+Players register, create or join a 5-player team with a 6-character invite code, and each pays the GH₵50 entry
+fee through Paystack. A team is **confirmed** when it has 5 members and all 5 have paid.
+- One router, `routes/codm.js`, mounted in app.js **before** the global parsers/sanitizers (like CropGuard). It sets
+  helmet, its own rate limit, `express.json({ limit: "20kb" })`, and a raw body for `POST /payments/webhook`. Every
+  input goes through `check.*` in `utils/codm.js` (type + pattern) before any query. Errors are the normal
+  `errors/*` classes, answered by the global handler as `{ msg }`; validation is 400, only bad/missing tokens are 401.
+- Models: `CodmPlayer` (own collection; bcrypt-12 `passwordHash`; `role` player/admin, never from a body),
+  `CodmTeam` (`nameKey` = lower-cased name, unique), `CodmPayment` (one row per checkout).
+- Tokens: `{ sub, role, tv, app: "codm" }`, no `userId` claim, Bearer header only (`middleware/codmAuth.js`).
+  Password change bumps `tokenVersion`. Admins: `node scripts/codmMakeAdmin.js <email>`.
+- Team changes are atomic: the player is claimed (`teamId: null` → team) before the team is touched, and joins use
+  `members.<size-1> $exists: false` so a team can never pass `CODM_TEAM_SIZE`. A captain who leaves hands over to the
+  longest-standing member; the last member leaving deletes the team. Payment stays with the player.
+- Paystack: the amount is `CODM_ENTRY_FEE_GHS` plus Paystack's fee when `CODM_PASS_FEES` is on (default): `feeBreakdown()` in
+  `utils/codm.js`, Paystack's formula price / (1 − `CODM_PAYSTACK_FEE_PERCENT`, 1.95), rounded up to the pesewa (GH₵50 → GH₵51.00).
+  `/event` exposes `processingFeeGhs`/`totalChargeGhs`. `CodmPayment.entryPesewas` is the entry part (`entryPesewasOf()` for older rows);
+  admin totals, refund rows and refunds use the entry (GH₵50); Paystack keeps its fee. The paid check also accepts `requested_amount`. Cash payments
+  recorded by admins stay at the entry fee; `callbackUrl` must pass `isAllowedCodmRedirect`
+  (`ALLOWED_REDIRECT_DOMAINS` or the origin of `CODM_CLIENT_URL`). A player is marked paid only by
+  `applySuccessfulCharge()` after amount, currency, `metadata.app === "codm"` and `metadata.playerId` match, from
+  the verify call or the HMAC-checked webhook. Key: `CODM_PAYSTACK_SECRET_KEY`; otherwise in production only `PAYSTACK_SECRET_KEY` (never the TEST key) and only
+  charges with `domain: "live"` count (`CODM_ALLOW_TEST_PAYMENTS=true` for staging); locally the TEST key is used.
+  Payment/join limiters are keyed per player, sign-ups 400/h per IP (campus NAT).
+  Payments the return page missed (slow MoMo approval, page closed) are caught by `sweepPendingPayments()`: every
+  5 min, plus `POST /payments/sync` (player, on dashboard load) and `POST /admin/payments/sync`, it re-verifies
+  unconfirmed checkouts (`pending`, or `failed` after "abandoned") from the last 3 days with Paystack.
+  A Paystack account has one webhook URL: only point it at `/api/v1/codm/payments/webhook` if no other app needs it;
+  the verify call alone is enough.
+- Event settings (fee, prize, team size, max teams, start, registration close, venue, WhatsApp link) are `CODM_*`
+  env vars with defaults in `eventConfig()`. Registration closes at `CODM_REGISTRATION_CLOSES_AT`.
+- **Paying registers you**: create/join team require `player.paid`. Admins can record cash payments
+  (`PATCH /admin/players/:id/paid`, reference `cash_…`); Paystack payments can't be undone there.
+- **Knockout bracket** (`models/CodmBracket.js`, one doc `_id: "main"`, `controllers/codmBracket.js`): `POST /admin/bracket/generate`
+  draws all confirmed teams at random into single elimination, sized to the next power of two, byes spread evenly and
+  advanced at once. Match ids `r<round>m<index>`; the winner goes to `r+1`/`m>>1`, slot A for even index. `PATCH
+  /admin/bracket/matches/:id` sets `winnerTeamId` (or null to undo, only while the next match is undecided), `startsAt`,
+  `note`, `score`. `GET /bracket` (public) returns rounds, `upNext` and `champion`. Team changes lock once a bracket exists;
+  `DELETE /admin/bracket { confirm: "RESET" }` removes it.
+- **Login lockout** (`login` in `controllers/codmAuth.js`, `models/CodmLoginAttempt.js`): keyed by sha256 of the browser
+  session id (`X-Codm-Session`, kept by the site in sessionStorage; falls back to the IP) and the identifier. After 4 wrong
+  passwords: locked 30 s, then doubling per further miss up to 1 h, answered as 429 with `Retry-After`. A new browser
+  session starts from zero (organiser's choice), so there is also a per-account row (session ignored): 20 misses in 15 min
+  (`CODM_ACCOUNT_LOGIN_FAILURES_PER_15_MIN`) locks the account 15 min. Counters use atomic `$inc`. Unknown accounts still
+  run a dummy bcrypt compare (timing). The route's per-IP limiter (150 failures / 15 min, campus NAT) is the last backstop. Stored in Mongo with a TTL so it works across several instances. `X-Codm-Session` is in `utils/corsPolicy.js`.
+- **Load**: `GET /event`, `/teams`, `/bracket` go through `cachedPublic()` (`utils/codm.js`, `CODM_PUBLIC_CACHE_MS`, default
+  4 s, in-flight requests shared) and send `Cache-Control: public, max-age=4, stale-while-revalidate=30`. Every write that
+  changes them calls `clearPublicCache()`. Nothing else is kept in process memory, so the API can run as several Render
+  instances; the express-rate-limit counters are per instance.
+- Organiser accounts: `CODM_BOOTSTRAP_ADMIN_EMAILS` + `CODM_BOOTSTRAP_ADMIN_PASSWORD` (`utils/codmBootstrap.js`) create
+  missing admins at startup; sign-up refuses those emails; an existing player account is never auto-promoted.
+- **Refunds** (`controllers/codmRefunds.js`, admin): `POST /admin/players/:id/refund { confirm: true }` refunds one player
+  (Paystack Refund API; cash entries are only recorded as `manual`, the organiser hands the cash back), unpays them and takes
+  them out of their team (refused once a bracket exists, unless the event is cancelled). `POST /admin/refunds/all
+  { confirm: "CANCEL AND REFUND", reason }` sets `CodmEventState` (`_id: "main"`, `cancelledAt`, never cleared by the API),
+  which stops payments and team changes and shows `cancelled` on `/event`, then refunds every Paystack payment in the
+  background; calling it again retries only unfinished ones. `GET /admin/refunds` lists them and refreshes pending ones
+  from Paystack. Each payment is claimed atomically (`refundStatus: "requesting"`, expires after 10 min) before Paystack is
+  called, so nothing is refunded twice; a "fully reversed" answer counts as processed. `applySuccessfulCharge` ignores
+  refunded payments. Paystack keeps its fee on refunds, and a Starter Business's refunds come from pending payouts, so a
+  refund can fail with Paystack's balance message (`refundError`). The organiser can then fund it from their own MoMo:
+  `POST /admin/players/:id/refund/fund { phone? }` charges exactly the entry (GH₵50, organiser's choice; ~GH₵49.02 lands after Paystack's fee) through Paystack's
+  Charge API (`mobile_money`, provider from `detectNetwork`; the PIN is typed on the phone), `POST /admin/refunds/fund/:ref/otp`
+  submits an OTP if the network asks, and `GET /admin/refunds/fund/:ref` verifies the charge and then runs the refund once
+  (`models/CodmRefundFunding.js`, `refundStarted` claimed atomically). References are `codmfund_<paymentId>_<ms>`.
+  `POST /admin/refunds/all/fund { confirm, reason }` does the same for everyone: one prompt for the sum of the unrefunded
+  online entries (GH₵50 each); once paid it cancels the event and runs the refund-everyone job (`codmfundall_<ms>`, kind "all").
+- Admin: `PATCH /admin/players/:id { fullName?, ign?, codmUid?, phone?, email? }` edits any player (own account included;
+  never role, payment or password; `paymentChannel` only for organiser-recorded `cash_` entries:
+  Cash, MTN MoMo, Telecel Cash or AirtelTigo Money). `DELETE /admin/players/:id { confirm: <email> }` removes an unpaid,
+  teamless account; another organiser's too (never your own or the last one); a deleted
+  organiser's email goes into `CodmEventState.removedOrganisers` so the bootstrap does not recreate it. `GET /admin/overview`, `GET /admin/export.csv` (cells starting with = + - @ are prefixed against CSV injection).
+
+## Developer platform (`/developers`, `/api/v1/platform/*`, `/api/v1/apps/<slug>/*`)
+
+Lets outside developers register an app (frontend URLs, data collections) and get a generated REST API, with no code of theirs ever running here.
+
+**Pieces.**
+- Dashboard: `public/developers/` (vanilla JS, strict CSP set in app.js, everything rendered with `textContent`). Hash routes: `#/apps/<id>/overview|frontends|apis|usage|settings`, `#/profile`.
+- `routes/platform.js` exports two routers, mounted in app.js **before** the global parsers/sanitizers (like CropGuard), each with its own JSON parser, helmet and `{ detail: { code, message, fields? } }` error handler.
+- Models: `PlatformDeveloper`, `PlatformApp` (spec + keys), `PlatformAppUser` (scoped by `appId`; same email can exist in two apps), `PlatformRecord` (`appId`, `collectionName`, `ownerId`, `data`). Files: GridFS bucket `platformFiles` (`utils/platformStorage.js`).
+- `utils/platform.js` holds the spec validator (`validateAppSpec`), the record validator (`validateRecord`) and the limits.
+
+**Security model.**
+- The app spec is data. Collection and field names are regex-checked and reserved names refused. Types come from a fixed list. Access rules: read `public|signed_in|owner|admin`, create `public|signed_in|admin`, update/delete `owner|admin`.
+- Records: unknown keys are rejected and every value is coerced to its declared type, so nothing reaches Mongo as an operator. Filters are equality on schema fields only, cast by type; sorting is by schema fields or `created_at`; at most 16 KB per record.
+- Callers: browsers and phones send `X-App-Key` (the publishable key). A request with an `Origin` must come from `frontendOrigins` (or any localhost port while `allowLocalhost`). `Bearer sk_…` (the secret key, stored as SHA-256 and shown once) is admin of that app only, and is refused if an `Origin` header is present (browser leak). End users get JWTs `{ sub, aid, app: "platform-app", tv, av }`; developers get `{ sub, app: "platform", tv }`. Neither has `userId`, so the shared middleware rejects both.
+- Files: the type is sniffed from the bytes; images are re-encoded (EXIF/GPS dropped); each file has a random 128-bit id; they are served with `CSP: sandbox` and `nosniff`; PDFs are sent as attachments.
+- Limits (`PLATFORM_*` env vars): apps per developer, records, users and MB per app, requests per minute per app, writes and auth attempts per IP. Reset links use `ORIGIN`, never the request's Host header.
+- "Describe what you want" (`utils/platformSuggest.js`): recommends built-ins (accounts, uploads, reset), says what isn't supported (payments, SMS, websockets), detects existing collections, then drafts a collection from the AI (`utils/ghgptAi.js`) or vetted templates. The draft goes through `validateAppSpec`, so a prompt-injected answer can't weaken anything, and nothing is saved until the developer clicks Create. `PLATFORM_AI_SUGGESTIONS=false` disables the AI.
+
+Tests: `CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/cropguard_test npm run test:platform` (same throwaway-database rule as CropGuard).
+
+## Skills to use
+
+Load these skills (they are installed for this user) before working in this repo:
+- `/production-ready-app` – **use first for any backend work**: keeps the API up for 1,000+ users without errors (security, scale, ops, failure paths). Read and follow `docs/skills/production-ready-app/SKILL.md` before backend work (if `/production-ready-app` isn't installed as a slash command yet, see the install line in `../CLAUDE.md`).
+- `/vibe-code-legal-audit` – security, privacy and legal hardening of the backend and every app that calls it
+- `/solveweb` – debugging and fixing web/API problems
+- `/web-across-platform` – make sure every change still works for all clients: the web apps, the Expo mobile app and the static pages
+- `/impeccable` – UI/UX quality, accessibility, responsive behaviour, polish and audits
+- `/design-taste-frontend` – art direction for pages and app screens
+- `/emil-design-eng` – interaction details, motion and component craft
+
+The FullBackendd API is shared by many live apps (Nsoro, GH-GPT, CleanBridge, SeedBridge, GhanaCropGuard web and mobile, the portfolio and the static MTN/AFA pages). Before changing any route, middleware, error shape, CORS, auth or rate limit, grep those apps' folders in `Desktop/VS Projects` for what they use, and keep each of them working.
+
+## Legal and security rules (all apps)
+
+- Never take `role` (or any privilege) from a sign-up body. `/api/v1/auth/signup` only allows `worker`/`caterer`, else `user`; `adminOnly` trusts `User.role`.
+- Nsoro reports: `models/NsoroReport.js`, `POST /nsoro/posts/:id/report`, admin-only `GET /nsoro/reports` and `PATCH /nsoro/reports/:id`; admins may `DELETE /nsoro/posts/:id` for anyone (closes the post's open reports).
+- Email: production needs `MAIL_RELAY_URL` + `MAIL_RELAY_SECRET` (`scripts/gmailRelay.gs`) because Render blocks SMTP; without them every password-reset email fails. Marketing mailers (Nsoro, GH-GPT, CleanBridge) print `MAIL_POSTAL_ADDRESS` in the footer (CAN-SPAM) and keep one-click unsubscribe.
+- The CSP no longer allows Google Fonts; frontends bundle their fonts.
+- SeedBridge sign-up stores the email trimmed and lowercased (password reset finds users by email).
+
+## Production hardening — continue here (started 2026-11-26)
+
+Branch `hardening/production-ready`, **not pushed yet** – push from your own terminal:
+`git push -u origin hardening/production-ready` (never push the `archive/*` branches: they contain an old `.env`), then
+open a PR into `main`. Full findings with evidence: `PRODUCTION_AUDIT.md`.
+
+**Tests** (59, all green 2026-11-26; CI runs them on every push via `.github/workflows/ci.yml`):
+`CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/x_test npm run test:security` (self-pentest + Paystack webhook failure
+paths in `test/security/`), `test:cropguard`, `test:platform`. No local Mongo: `npm i mongodb-memory-server` in a folder
+outside this repo and start `MongoMemoryServer.create({ instance: { port: 27017 } })`. Add a test to `test/security/`
+for every new security fix and mark it "verified" in the audit.
+
+**Done**
+- Ordering/ops (`bfcc792`): helmet + `/api` limiter before every router (don't re-add one further down); `:safe-url`
+  morgan token; Mongo pool/timeouts; `/healthz`; exit(1) when Mongo is down at boot; graceful SIGTERM; `PYTHON_BIN`; indexes.
+- `/readyz` (Mongo ping, 503 while shutting down), `utils/checkEnv.js` at boot, `uncaughtException` → graceful exit,
+  `ecosystem.config.js` (PM2 `max_memory_restart`), CI workflow.
+- Critical data leak fixed: public posts used to return password hashes and login tokens (`User` `toJSON`, `POST_USER_FIELDS`).
+- Access control: cart/orders (`utils/shop.js` ownership, anonymous demo cart kept), AFA + MTN orders (`adminOnly`; dashboard
+  uses the cookie), food orders / meals / feedback / UniServe (user from the token, roles). Stored XSS in
+  `static/afrodata.html` / `dashboard.html` escaped. HS256 pinned everywhere; `?oven=` off. N+1 cart pricing, the
+  load-every-order checkout, frozen `Date.now()` defaults and delivery dates fixed. Lists capped/paginated.
+- Removed `crypto`, `https`, `stream`, `buffer`, `logger`, `rate-limiter` deps and the dead `foodmiddleware.js`;
+  `npm audit fix` (90 → 64 advisories).
+- The old `../FullBackendd-master` clone was merged in and deleted: its branches are `archive/old-history-abakahjayy`,
+  `archive/abakahjayy-old-master`, `archive/abakahjayy-old-portfolio-integration`; `AGENTS.md` (Codex copy of this file)
+  and `misc/josephine.py` came from it. `node_modules` used to be a symlink into that folder; it is a real install now.
+
+**Verify before merging**: `npm ci --legacy-peer-deps`, `npm start`, `/healthz` + `/readyz`; admin dashboard
+(`/afrodatadashboard`) loads AFA + orders as an admin; Nsoro Explore + post upload; Amazon demo add-to-cart → order.
+
+**Next** (owner decisions first; details in PRODUCTION_AUDIT.md "Needs your decision")
+1. 🔴 Rotate `JWT_SECRET` to 48 random bytes (it is 17 chars; signs everyone out), then `REQUIRE_STRONG_SECRETS=true`.
+   Rotate the keys that were in git history.
+2. 🔴 Promote the admin accounts (`scripts/makeNsoroAdmin.js`, see Auth above) – needs the owner to run it against Atlas.
+3. 🟠 Major upgrades, one PR each with the tests: sharp, nodemailer, validator, multer, express-fileupload, then mongoose 5 → 8.
+   Then make the CI `npm audit` step blocking.
+4. 🟠 Google OAuth `redirect_uri` allow-list (kept open by the owner's choice so far).
+5. 🟠 `adminOnly` → 403 instead of 401 (check Nsoro's 401 interceptor first).
+6. 🟠 Atlas daily backups + a **tested** restore; Sentry; UptimeRobot on `/readyz`; Render health check on `/healthz`.
+7. 🟡 Login for the Amazon demo shop (then its carts become per-user automatically).
+8. 🟡 BullMQ + Redis for AI/sharp/Excel/email jobs; Redis for rate limits and Socket.IO before a second instance.
+9. 🟢 Pin Node (`engines`/`.nvmrc`) to the version Render runs now.
+
+Other projects in `Desktop/VS Projects` have **not** been audited yet; run `/production-ready-app` in each (CODM, CleanBridge-GH, JayRouter, helpdesk-main, ghanacropguard-ai, GHGPT-main, React-products-master, …).
