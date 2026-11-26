@@ -548,6 +548,7 @@ Tests: `CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/cropguard_test npm ru
 ## Skills to use
 
 Load these skills (they are installed for this user) before working in this repo:
+- `/production-ready-app` – **use first for any backend work**: keeps the API up for 1,000+ users without errors (security, scale, ops, failure paths). Read and follow `docs/skills/production-ready-app/SKILL.md` before backend work (if `/production-ready-app` isn't installed as a slash command yet, see the install line in `../CLAUDE.md`).
 - `/vibe-code-legal-audit` – security, privacy and legal hardening of the backend and every app that calls it
 - `/solveweb` – debugging and fixing web/API problems
 - `/web-across-platform` – make sure every change still works for all clients: the web apps, the Expo mobile app and the static pages
@@ -564,3 +565,33 @@ The FullBackendd API is shared by many live apps (Nsoro, GH-GPT, CleanBridge, Se
 - Email: production needs `MAIL_RELAY_URL` + `MAIL_RELAY_SECRET` (`scripts/gmailRelay.gs`) because Render blocks SMTP; without them every password-reset email fails. Marketing mailers (Nsoro, GH-GPT, CleanBridge) print `MAIL_POSTAL_ADDRESS` in the footer (CAN-SPAM) and keep one-click unsubscribe.
 - The CSP no longer allows Google Fonts; frontends bundle their fonts.
 - SeedBridge sign-up stores the email trimmed and lowercased (password reset finds users by email).
+
+## Production hardening — continue here (started 2026-11-26)
+
+Branch `hardening/production-ready` (commit `bfcc792`), **not pushed yet** – push from your own terminal:
+`git push -u origin hardening/production-ready`, then open a PR into `main`. Full findings: `PRODUCTION_AUDIT.md`.
+
+**Done on the branch**
+- `app.js`: `helmet` (no CSP, cross-origin resources allowed) and the global `/api` rate limiter now run **before every router** – the upload, AI, posts, stories, CropGuard, CODM and platform routers used to be mounted above them. The old limiter block further down was removed; don't re-add one there.
+- `app.js`: morgan uses a `:safe-url` token that redacts `oven`, `token`, `access_token`, `code` query params. Keep using it for any new logger.
+- `app.js`: `GET /healthz` → 200 `{status:'ok',db:'up'}` / 503 when Mongo is down. Point Render's health check and an uptime monitor at it.
+- `app.js`: boot exits with code 1 if Mongo can't connect (PM2/Render restart it); graceful SIGTERM/SIGINT shutdown (10s hard stop); `unhandledRejection` is logged.
+- `app.js`: `/api/chat` reads `PYTHON_BIN` (default is still the old Windows anaconda path).
+- `db/connect.js`: `poolSize` (`MONGO_POOL_SIZE`, default 20), `serverSelectionTimeoutMS` (`MONGO_SERVER_SELECTION_MS`, default 10000), `socketTimeoutMS` 45000.
+- `middleware/auth.js`: removed the per-request "Token verified" log.
+- Indexes added: Posts, Comments, FoodOrders, Token, UserOrder, UssdSession, SeedBridgeProduce, FoodFeedback (Mongo builds them on first boot).
+
+**Verify before merging**: `npm start`, open `/healthz`, upload a Nsoro post image (cross-origin media must still load), log in on one frontend, place a CODM/SeedBridge test payment.
+
+**Next, in this order** (each needs a frontend check first – see the "keep every app working" rule above)
+1. 🔴 Cart/Orders IDOR: `routes/cart.js`, `routes/orders.js` have no auth; `GET /api/v1/cart` and `/orders` return everyone's data, and any id can be PATCHed/DELETEd. Add `authMiddleware`, filter by `req.user.userId`, update the shop frontend in `React-products-master` to send the token.
+2. 🔴 Same check for `/api/v1/delivery`, `/api/v1/ordersdata`, `/api/v1/afa` list, `/api/v1/foodorders` admin lists → `adminOnly` or owner filter.
+3. 🟠 Re-enable `isAllowedRedirectUri()` for Google OAuth with `ALLOWED_REDIRECT_DOMAINS` (currently any `redirect_uri` gets the token).
+4. 🟠 Drop the `?oven=` token from `middleware/auth.js` once the static pages use the cookie/header.
+5. 🟡 Paginate list endpoints (`postController.getAllPosts`, carts, orders, food orders, UniServe) with `?page=&limit=` max 100.
+6. 🟡 `controllers/orders.js` `createOrders` loads every order to match `orderTime` → `findOne({ orderTime, createdBy })`.
+7. 🟡 Socket.IO `cors.origin: '*'` → reuse `utils/corsPolicy` origins.
+8. 🟢 Prune junk deps (`crypto`, `https`, `stream`, `buffer`, `logger`, `rate-limiter`, `xss-clean`), run `npm audit`.
+9. 🟢 `node --test` cases for payment failure paths (declined charge, duplicate/late Paystack webhook, refund funding).
+
+Other projects in `Desktop/VS Projects` have **not** been audited yet; run `/production-ready-app` in each (CODM, CleanBridge-GH, JayRouter, helpdesk-main, ghanacropguard-ai, GHGPT-main, React-products-master, …).
