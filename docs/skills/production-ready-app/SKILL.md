@@ -77,7 +77,7 @@ Only test systems you own, on local or staging, never real users' data or live p
 2. **Index what you search** - every field used in filters, joins, sorts and foreign keys; confirm with `EXPLAIN`/`.explain()`.
 3. **Speed up RLS policies** - `(select auth.uid())`, index policy columns, no joins in policies.
 4. **Connection pooler** - one shared pool per process with explicit size and fail-fast timeouts; PgBouncer/Supavisor for serverless.
-5. **Kill N+1 queries** - eager-load/batch; never load a whole collection to find one record.
+5. **Kill N+1 queries** - eager-load/join or batch (`IN (...)`, DataLoader); never load a whole collection to find one record.
 6. **Paginate every list** - cursor or limit/offset, max page size ~100.
 7. **Cache what's the same** - CDN + HTTP cache headers for public data; Redis/in-memory for hot reads; invalidate on write.
 8. **Retry AI/external calls with backoff** - exponential backoff + jitter, a timeout on every outbound call, circuit breaker, handle 429.
@@ -116,15 +116,15 @@ Only test systems you own, on local or staging, never real users' data or live p
 
 ## F. "Works on my machine" - test the failure paths
 
-For signup, login, payment, upload and checkout, test and handle: payment failed/declined, webhook late or duplicated (idempotent handlers), network drop/timeouts/double-submit, expired session mid-flow, duplicate email, invalid input, empty states, third-party service down or returning 429, and production-only differences (env vars, DB, CORS origin, HTTPS, timezone, read-only file system). Write integration/e2e tests for these and run them in CI.
+For signup, login, payment, upload and checkout, test and handle: payment failed/declined, webhook late or duplicated (idempotent handlers), network drop, slow 3G, timeouts, double-submit, expired session mid-flow, duplicate email, invalid input, empty states, third-party service down, returning 429 or returning garbage, and production-only differences (env vars, DB, CORS origin, HTTPS, timezone, read-only file system). Show user-facing error messages that say what to do next. Write integration/e2e tests for these and run them in CI.
 
 ## G. SEO (web frontends only)
 
-1. Server-render or pre-render pages. 2. Real `<a href>` links. 3. Google Search Console. 4. `sitemap.xml` + `robots.txt`. 5. Hunt stray `noindex`. 6. Real 404 status codes. 7. One canonical URL per page. 8. Unique title + meta description per page. 9. Same content on mobile. 10. Image `alt` text. 11. JSON-LD structured data. 12. Pass Core Web Vitals. 13. Fact-check AI-written copy. 14. Google Business Profile for local businesses.
+1. Server-render or pre-render pages (content in the HTML, not only after JS). 2. Real `<a href>` links, not `onClick` navigation. 3. Google Search Console. 4. `sitemap.xml` + `robots.txt`. 5. Hunt stray `noindex`. 6. Real 404 status codes. 7. One canonical URL per page (consistent trailing slash / www, redirect duplicates). 8. Unique title + meta description per page. 9. Same content on mobile. 10. Image `alt` text. 11. JSON-LD structured data. 12. Pass Core Web Vitals (LCP, INP, CLS: optimize images, fonts, JS size). 13. Fact-check AI-written copy. 14. Google Business Profile for local businesses.
 
 ## H. UI: don't hand-roll components with AI
 
-Use proven accessible libraries (Radix/shadcn, Headless UI, MUI, Chakra, Mantine; React Native Paper; Material 3) instead of custom dropdowns, modals, tabs, toasts and menus. Check keyboard-only navigation, visible focus, input labels, colour contrast and screen-reader names.
+Use proven accessible libraries (Radix/shadcn, Headless UI, MUI, Chakra, Mantine on web; React Native Paper/Tamagui; Material 3 for Android/Flutter) instead of custom dropdowns, modals, tabs, toasts and menus. Check keyboard-only navigation, visible focus, input labels, colour contrast and screen-reader names.
 
 ## Applying across many projects
 
