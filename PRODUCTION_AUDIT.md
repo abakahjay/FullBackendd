@@ -13,6 +13,12 @@ CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/any_test npm run test:platfor
 
 No local MongoDB? Use `mongodb-memory-server` from a folder outside this repo (see CLAUDE.md). CI runs all three on every push (`.github/workflows/ci.yml`).
 
+## 🔴 Act now: the old backend copy is live on the same database (found 2026-11-28)
+`https://openlabs-project-2.onrender.com` (the old `openlabs-project` copy) still runs and returns the **same posts as FullBackendd** (same MongoDB). Its `/api/v1/posts/user/:id` still sends **password hashes and login tokens**, and none of the fixes in this file apply to it, so every hole closed here is still open through it. Checked read-only; values were counted, never printed.
+1. Render → `openlabs-project-2` → Settings → **Suspend** (nothing working depends on it: SeedBridge now calls FullBackendd, and the old copy didn't even have the SeedBridge routes).
+2. Then rotate `JWT_SECRET` (tokens leaked through it stay valid until you do) and treat the password hashes as exposed (bcrypt, but weak passwords can be cracked): consider asking users to change passwords.
+3. If its Render service has its own copy of the secrets, rotate those too (Paystack, mail, AI keys).
+
 ## Fixed on this branch
 
 "Verified" means a test in `test/security/` attacks it and passes. Re-run it after any change.
