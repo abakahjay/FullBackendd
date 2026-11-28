@@ -9,9 +9,17 @@ const askOpenAI = require("../utils/openaiService");
 const askAi = require("../utils/askAi");
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() }); // keep file in memory
+const authMiddleware = require('../middleware/auth');
+// Kept in memory, so capped: one image, 10 MB.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) =>
+    /^image\//.test(file.mimetype) ? cb(null, true) : cb(new BadRequestError('Only image files are allowed')),
+});
 
-router.post('/ask', upload.single('image'), async (req, res) => {
+// Signed-in users only: every call spends paid/free AI quota (GH-GPT always sends its token).
+router.post('/ask', authMiddleware, upload.single('image'), async (req, res) => {
   // try {
   const { prompt, provider } = req.body;
   if (!prompt && !req.file) {
@@ -76,7 +84,7 @@ router.post('/ask', upload.single('image'), async (req, res) => {
   res.status(StatusCodes.OK).json(response.data);
 });
 
-router.post("/gpio/update", async (req, res) => {
+router.post("/gpio/update", authMiddleware, async (req, res) => {
   const { pin, state } = req.body;
 
   if (!pin) return res.status(400).json({ error: "Pin required" });

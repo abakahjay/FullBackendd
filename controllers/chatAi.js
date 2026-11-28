@@ -360,19 +360,26 @@ exports.deleteImage = async (req, res) => {
     if (!fileId || !chatId) {
         throw new BadRequestError('Please provide both fileId and chatId');
     }
-    const gfs = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: 'uploads' });
-
-    const file = await gfs.find({ _id: new ObjectId(fileId) }).toArray();
-
-    if (file.length === 0) {
-        throw new NotFoundError(`No Image found with id: ${fileId}`)
+    if (!mongoose.isValidObjectId(fileId) || !mongoose.isValidObjectId(chatId)) {
+        throw new BadRequestError('Invalid fileId or chatId');
     }
-    await gfs.delete(new ObjectId(fileId));
-    const chat = await Chat.findOne({ _id: chatId });
-
+    // Ownership first: the 'uploads' bucket is shared with Nsoro posts, voice notes
+    // and moments, so a file is only deleted when it is an image in the caller's own chat.
+    const chat = await Chat.findOne({ _id: chatId, userId: req.user.userId });
     if (!chat) {
         throw new NotFoundError(`No chat found with id: ${chatId}`)
     }
+    const inChat = chat.history.some((msg) => msg.img && msg.img.toString() === fileId);
+    if (!inChat) {
+        throw new NotFoundError(`No Image found with id: ${fileId}`)
+    }
+
+    const gfs = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: 'uploads' });
+    const file = await gfs.find({ _id: new ObjectId(fileId) }).toArray();
+    if (file.length > 0) {
+        await gfs.delete(new ObjectId(fileId));
+    }
+
     chat.history = chat.history.filter(
         (msg) => !(msg.img && msg.img.toString() === fileId)
     );

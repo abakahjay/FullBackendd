@@ -11,16 +11,23 @@ const {
     searchChatsByTitle,
     editMessageInChat
 } = require('../controllers/chatAi');
+const authMiddleware = require('../middleware/auth');
+const { requireSelf } = require('../middleware/auth');
 const router = express.Router();
 
-router.post("/chats/:userId",createChat);//
-router.get("/userchats/:userId", getUserChats);//
-router.get("/userchats/:userId/search-by-similarity", searchChatsByTitle);
-router.get("/chats/:userId/:chatId", getChatById);//
-router.patch("/chats/:userId/:chatId", updateChat);//
-router.delete('/chats/:userId/:chatId', deleteChat);//
-router.delete('/chats/:userId/:chatId/:messageIndex', deleteMessage);
-router.patch('/chats/:userId/:chatId/:messageIndex', editMessageInChat);
+// GH-GPT's older chat routes carry the owner in the URL. They used to need no
+// login, so anyone who knew a user id (public on every post) could read, edit or
+// delete that user's chats. Now the caller must be signed in as that user.
+const own = [authMiddleware, requireSelf('userId')];
+
+router.post("/chats/:userId", own, createChat);//
+router.get("/userchats/:userId", own, getUserChats);//
+router.get("/userchats/:userId/search-by-similarity", own, searchChatsByTitle);
+router.get("/chats/:userId/:chatId", own, getChatById);//
+router.patch("/chats/:userId/:chatId", own, updateChat);//
+router.delete('/chats/:userId/:chatId', own, deleteChat);//
+router.delete('/chats/:userId/:chatId/:messageIndex', own, deleteMessage);
+router.patch('/chats/:userId/:chatId/:messageIndex', own, editMessageInChat);
 
 
 //This is for imagekit and clerk backend

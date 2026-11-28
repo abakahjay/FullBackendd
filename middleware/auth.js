@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User.js');
-const { UnauthenticatedError, UnauthorizedError } = require('../errors');
+const { UnauthenticatedError, UnauthorizedError, NotFoundError } = require('../errors');
 
 // Only HS256 is ever issued (models/User.js createJWT). Pinning it means a token
 // with `alg: none` or another algorithm is rejected even if a library default changes.
@@ -77,9 +77,21 @@ const requireRole = (...roles) => {
 
 const isAdmin = (req) => req.user?.role === 'admin';
 
+// For older routes that carry the owner in the URL (/chats/:userId/...): the id
+// must be the caller's own. Another user's id answers 404, like a missing record,
+// so ids can't be probed. Usage: router.get('/x/:userId', authMiddleware, requireSelf(), h)
+const requireSelf = (param = 'userId') => (req, res, next) => {
+    if (!req.user) throw new UnauthenticatedError('No valid token provided.');
+    if (String(req.params[param]) !== String(req.user.userId)) {
+        throw new NotFoundError('Not found');
+    }
+    next();
+};
+
 module.exports = authenticationMiddleware;
 module.exports.optionalAuth = optionalAuth;
 module.exports.requireRole = requireRole;
 module.exports.isAdmin = isAdmin;
 module.exports.readToken = readToken;
 module.exports.JWT_ALGORITHMS = JWT_ALGORITHMS;
+module.exports.requireSelf = requireSelf;

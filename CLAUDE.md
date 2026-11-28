@@ -193,8 +193,9 @@ environments stay in sync. Vars actually read via `process.env.*` in code: `MONG
 Backend for the GH-GPT chatbot (frontend: `Desktop/VS Projects/GHGPT-main/GHGPT-main/Chatbot`, repo abakahjay/GHGPT,
 live at https://gh-gpt.onrender.com). It uses the shared `User` model and the chat models `ChatAi` (history of
 `{ role: 'user'|'model', parts: [{ text }], img? }`) and `UserChatAi` (per-user list of `{ chatId, title, pinned, createdAt }`).
-All `/api/v1/ghgpt` routes take the user from the JWT and only touch that user's chats; the older `/api/v1/ai/*`
-routes (userId in the URL, no auth) are kept for existing clients.
+All `/api/v1/ghgpt` routes take the user from the JWT and only touch that user's chats. The older `/api/v1/ai/*`
+routes keep the userId in the URL but since 2026-11-28 need the JWT, and `requireSelf('userId')` (`middleware/auth.js`) 404s
+any id that isn't the caller's; `/ask` and `/gpio/update` need a login; `/image/:id` stays public for `<img>` tags.
 - **AI** (`utils/ghgptAi.js`): `streamChat()` tries these in order:
   1. `OPENROUTER_MODEL`, only if it's set (e.g. a paid model once the account has credits)
   2. Gemini (`GEMINI_API_KEY`, free tier, reads images)
@@ -582,7 +583,7 @@ The FullBackendd API is shared by many live apps (Nsoro, GH-GPT, CleanBridge, Se
 Merged into `main` (fast-forward, 2026-11-26); Render deploys `main`, so it goes live on `git push origin main`
 (push from your own terminal; never push the `archive/*` branches: they contain an old `.env`). Full findings with evidence: `PRODUCTION_AUDIT.md`.
 
-**Tests** (59, all green 2026-11-26; CI runs them on every push via `.github/workflows/ci.yml`):
+**Tests** (61, all green 2026-11-28; CI runs them on every push via `.github/workflows/ci.yml`):
 `CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/x_test npm run test:security` (self-pentest + Paystack webhook failure
 paths in `test/security/`), `test:cropguard`, `test:platform`. No local Mongo: `npm i mongodb-memory-server` in a folder
 outside this repo and start `MongoMemoryServer.create({ instance: { port: 27017 } })`. Add a test to `test/security/`

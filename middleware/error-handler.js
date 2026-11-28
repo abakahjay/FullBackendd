@@ -37,6 +37,11 @@ const errorHandlerMiddleware = (err, req, res, next) => {
     }
     customError.statusCode = StatusCodes.NOT_FOUND;
   }
+  // Upload limits from any multer instance (size, file count, unexpected field).
+  if (err.name === 'MulterError') {
+    customError.statusCode = err.code === 'LIMIT_FILE_SIZE' ? StatusCodes.REQUEST_TOO_LONG : StatusCodes.BAD_REQUEST;
+    customError.message = err.code === 'LIMIT_FILE_SIZE' ? 'That file is too large.' : `Upload rejected: ${err.message}`;
+  }
   // Unexpected crashes (no status chosen by our code) can carry internals - driver
   // errors, file paths, keys in URLs - so production answers them generically.
   // The real message is in the log above.
