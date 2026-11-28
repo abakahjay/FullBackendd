@@ -3,10 +3,10 @@
 Branch: `hardening/production-ready` · Audited 2026-11-26 with the `production-ready-app` skill (sections A–F; G/H apply to the frontends).
 Stack: Node 22 · Express 4 · Mongoose 5 (MongoDB) · Socket.IO · Paystack · OpenAI/OpenRouter/Gemini · PM2/Render.
 
-**Tests:** 61 automated tests, all passing on a throwaway MongoDB.
+**Tests:** 62 automated tests, all passing on a throwaway MongoDB.
 
 ```
-CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/any_test npm run test:security    # 23: self-pentest + payment failure paths
+CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/any_test npm run test:security    # 24: self-pentest + payment failure paths
 CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/any_test npm run test:cropguard   # 31
 CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/any_test npm run test:platform    # 7
 ```
@@ -38,6 +38,7 @@ No local MongoDB? Use `mongodb-memory-server` from a folder outside this repo (s
 | 16 | 🔴 | **GH-GPT chats were world-readable and editable.** `/api/v1/ai/userchats/:userId`, `/chats/:userId/:chatId` (get/patch/delete, messages, search) and `/upload/:userId/:chatId` had no auth: the URL's user id was the only check, and user ids are public on every post. **Confirmed on live 2026-11-28** (anonymous → `200 "User Chats Found"`). | `authMiddleware` + `requireSelf('userId')` (`middleware/auth.js`): signed in as that user, else 401/404. GH-GPT sends its JWT on these calls (GHGPT repo, deploy it first). | ✅ `IDOR: GH-GPT` |
 | 17 | 🔴 | **`DELETE /api/v1/ai/chats/image/:chatId/:fileId` deleted any GridFS file in `uploads`** (shared with Nsoro posts, voice notes and moments) before checking anything. | Auth; the chat must be the caller's and the file an image in it; only then delete. Invalid ids → 400. | ✅ `GridFS` |
 | 18 | 🟠 | `POST /api/v1/ai/ask` (AI proxy) open to anonymous callers, and its multer had no size limit (memory). `POST /gpio/update` open. | Auth on both; `/ask` takes one image ≤ 10 MB. The global error handler now turns any `MulterError` into 413/400 instead of 500. | ✅ `IDOR: GH-GPT` (anonymous `/ask` → 401) |
+| 19 | 🔴 | **Account takeover: `PATCH /api/v1/users/:username/editUser` needed no login** and could set anyone's email (then forgot-password → account, admins included). The other old social routes trusted client ids: post/like/comment/follow as anyone, delete any post (`DELETE /posts/image/:fileId`) or comment, change anyone's photo (`/userse/:username/editUserProfile`). | `middleware/legacySocialGuards.js`: sign-in, acting user from the token (`asSelfQuery`, `asSelfBody`, `requireSelf('id')`), own profile only (`selfUsername`), owner/admin for deletes (`ownPostFile`, `ownComment`). Auth runs before multer. `req.user.username` now comes from the DB (the token's goes stale after a rename). GH-GPT sends its token on all of these. | ✅ `legacy social routes` (fails on the old code) |
 
 Also verified by attack test, no change needed: forged/unsigned Paystack webhooks (SeedBridge, CODM) are rejected; sign-up with `"role":"admin"` gives `user`; the login limiter answers 429; a 60 MB body gets 413 and the server stays up; malformed JSON has no stack trace; a foreign `Origin` gets no `Allow-Credentials`; `/.env`, `/.git/config`, `/app.js`, `/package.json` are not served.
 

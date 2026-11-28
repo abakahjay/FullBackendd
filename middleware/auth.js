@@ -36,7 +36,8 @@ async function resolveUser(token) {
     if (!userId) throw new UnauthenticatedError('Not authorized: wrong token type.');
     const user = await User.findById(userId).select('role username').lean();
     if (!user) throw new UnauthenticatedError('User not found.');
-    return { userId: String(userId), username, role: user.role || 'user' };
+    // username from the database: the token's copy goes stale after a rename.
+    return { userId: String(userId), username: user.username || username, role: user.role || 'user' };
 }
 
 const authenticationMiddleware = async (req, res, next) => {

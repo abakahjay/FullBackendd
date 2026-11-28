@@ -146,7 +146,7 @@ the last route in `postRoute.js`.
 
 These routes are versions of post create/delete, like/unlike, comments, follow/unfollow and profile edit/photo that take the user from the JWT and check ownership. They reuse the original handlers by overwriting `req.body.userId` / `req.query.userId` / `req.params.id` with the token's user.
 - Uploads (`POST /posts`, `PATCH /me/photo`) are in routes/nsoroUploadRoutes.js, mounted before express-fileupload.
-- The original open routes (`/api/v1/posts`, `/users/:id/follow`, `/comments`...) are deliberately unchanged: GHGPT-main's Chatbot still calls them without a token. Lock them only once no client uses them.
+- The original routes (`/api/v1/posts`, `/users/:id/follow`, `/comments`, `/users/:username/editUser`, `/userse/...`) need the JWT since 2026-11-28 (`middleware/legacySocialGuards.js`: acting user from the token, ownership on deletes, own profile only). GH-GPT sends its token on them. Reads (feed, images, profiles) stay public.
 
 **Mongoose defaults**: write `default: Date.now` (the function), never `Date.now()`, which is evaluated once
 at startup. `models/Message.js` had that bug, which gave every message the server's start time.
@@ -583,7 +583,7 @@ The FullBackendd API is shared by many live apps (Nsoro, GH-GPT, CleanBridge, Se
 Merged into `main` (fast-forward, 2026-11-26); Render deploys `main`, so it goes live on `git push origin main`
 (push from your own terminal; never push the `archive/*` branches: they contain an old `.env`). Full findings with evidence: `PRODUCTION_AUDIT.md`.
 
-**Tests** (61, all green 2026-11-28; CI runs them on every push via `.github/workflows/ci.yml`):
+**Tests** (62, all green 2026-11-28; CI runs them on every push via `.github/workflows/ci.yml`):
 `CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/x_test npm run test:security` (self-pentest + Paystack webhook failure
 paths in `test/security/`), `test:cropguard`, `test:platform`. No local Mongo: `npm i mongodb-memory-server` in a folder
 outside this repo and start `MongoMemoryServer.create({ instance: { port: 27017 } })`. Add a test to `test/security/`

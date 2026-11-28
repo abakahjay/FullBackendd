@@ -4,16 +4,20 @@ const { followUser, unfollowUser, getUser,getUserByName,editUser,getAllUsers,del
 const authenticationMiddleware = require('../middleware/auth');
 const adminOnly = require('../middleware/adminOnly');
 // authenticationMiddleware, adminOnly, 
+const { requireSelf } = require('../middleware/auth');
+const { asSelfQuery, asSelfBody, selfUsername, ownPostFile, ownComment } = require('../middleware/legacySocialGuards');
 const router = express.Router();
 
 router.delete('/:id',authenticationMiddleware, adminOnly,  deleteUser);
 
-router.patch('/:id/follow', followUser);
-router.patch('/:id/unfollow', unfollowUser);
+// :id is the follower (the caller), body.userId the person followed.
+router.patch('/:id/follow', authenticationMiddleware, requireSelf('id'), followUser);
+router.patch('/:id/unfollow', authenticationMiddleware, requireSelf('id'), unfollowUser);
 router.get('/search', searchUsers); // must stay above '/:id'
 router.get('/:id', getUser);
 router.get('/',getAllUsers);
 router.patch('/:username', getUserByName);
-router.patch('/:username/editUser',editUser);
+// Was open: anyone could change anyone's email, then reset the password.
+router.patch('/:username/editUser', authenticationMiddleware, selfUsername, editUser);
 
 module.exports = router;
