@@ -7,6 +7,18 @@ const { notify, unnotify } = require('../utils/socialNotify');
 const PRIVATE_FIELDS = '-password -tokens -resetPasswordToken -resetPasswordExpires';
 const POPULATE_PUBLIC = { path: 'followers following', select: `${PRIVATE_FIELDS} -email -phone` };
 
+// Profiles are public, but email and phone only go to the account itself or an admin
+// (routes use optionalAuth, so req.user is set when a valid token is sent).
+const withoutContact = (req, user) => {
+  const out = user.toJSON();
+  const own = req.user && String(req.user.userId) === String(user._id);
+  if (!own && req.user?.role !== 'admin') {
+    delete out.email;
+    delete out.phone;
+  }
+  return out;
+};
+
 exports.followUser = async (req, res) => {
   const { id } = req.params;//UserId
   if(!id){
@@ -95,7 +107,7 @@ exports.getUser = async (req, res) => {
     }
                                                                                                                                       
     console.log('\x1b[36m%s\x1b[0m',`Username: ${id} found`)
-    res.status(StatusCodes.OK).json({message:`User: ${id} found successfully `,user});
+    res.status(StatusCodes.OK).json({message:`User: ${id} found successfully `,user: withoutContact(req, user)});
 };
 exports.getAllUsers = async (req, res) => {
     let limit=Number(req.query.limit)
@@ -160,7 +172,7 @@ exports.getUserByName = async (req, res) => {
       throw new NotFoundError(`No user with username: ${username}`)
     }
     console.log('\x1b[36m%s\x1b[0m',`Username: ${username} found`)
-    res.status(StatusCodes.OK).json({message:`User: ${username} found successfully `,user});
+    res.status(StatusCodes.OK).json({message:`User: ${username} found successfully `,user: withoutContact(req, user)});
 };
 
 

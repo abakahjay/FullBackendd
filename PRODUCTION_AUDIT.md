@@ -3,10 +3,10 @@
 Branch: `hardening/production-ready` · Audited 2026-11-26 with the `production-ready-app` skill (sections A–F; G/H apply to the frontends).
 Stack: Node 22 · Express 4 · Mongoose 5 (MongoDB) · Socket.IO · Paystack · OpenAI/OpenRouter/Gemini · PM2/Render.
 
-**Tests:** 62 automated tests, all passing on a throwaway MongoDB.
+**Tests:** 64 automated tests, all passing on a throwaway MongoDB.
 
 ```
-CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/any_test npm run test:security    # 24: self-pentest + payment failure paths
+CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/any_test npm run test:security    # 26: self-pentest + payment failure paths
 CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/any_test npm run test:cropguard   # 31
 CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/any_test npm run test:platform    # 7
 ```
@@ -39,10 +39,15 @@ No local MongoDB? Use `mongodb-memory-server` from a folder outside this repo (s
 | 17 | 🔴 | **`DELETE /api/v1/ai/chats/image/:chatId/:fileId` deleted any GridFS file in `uploads`** (shared with Nsoro posts, voice notes and moments) before checking anything. | Auth; the chat must be the caller's and the file an image in it; only then delete. Invalid ids → 400. | ✅ `GridFS` |
 | 18 | 🟠 | `POST /api/v1/ai/ask` (AI proxy) open to anonymous callers, and its multer had no size limit (memory). `POST /gpio/update` open. | Auth on both; `/ask` takes one image ≤ 10 MB. The global error handler now turns any `MulterError` into 413/400 instead of 500. | ✅ `IDOR: GH-GPT` (anonymous `/ask` → 401) |
 | 19 | 🔴 | **Account takeover: `PATCH /api/v1/users/:username/editUser` needed no login** and could set anyone's email (then forgot-password → account, admins included). The other old social routes trusted client ids: post/like/comment/follow as anyone, delete any post (`DELETE /posts/image/:fileId`) or comment, change anyone's photo (`/userse/:username/editUserProfile`). | `middleware/legacySocialGuards.js`: sign-in, acting user from the token (`asSelfQuery`, `asSelfBody`, `requireSelf('id')`), own profile only (`selfUsername`), owner/admin for deletes (`ownPostFile`, `ownComment`). Auth runs before multer. `req.user.username` now comes from the DB (the token's goes stale after a rename). GH-GPT sends its token on all of these. | ✅ `legacy social routes` (fails on the old code) |
+| 20 | 🔴 | **More open writes found by a sweep of every route:** `/api/v1/uploadFiles/delete|rename/:fileId` and `/upload/*` worked on the shared `uploads` bucket with no login (delete anyone's Nsoro media, voice notes, GH-GPT images); `/api/v1/bundles` POST/PUT/DELETE (anyone could change the MTN price list); `/reloadly/purchase` (airtime from the Reloadly balance; sandbox today, critical the day it goes live); `/muviin/initiate` (MoMo debit prompts to any number). | GridFS tools and bundle writes: `authMiddleware, adminOnly` (no client uses them). Reloadly and Muviin: login required; their static pages send the `token` cookie. | ✅ `open writes` |
+| 21 | 🟠 | **Any user's email was public**: `GET /api/v1/users/:id` and `PATCH /users/:username` (profile lookups). Confirmed on live. | `optionalAuth`; email and phone only for the owner or an admin (`withoutContact`). No client shows another user's email. | ✅ `data leak: a profile` |
 
 Also verified by attack test, no change needed: forged/unsigned Paystack webhooks (SeedBridge, CODM) are rejected; sign-up with `"role":"admin"` gives `user`; the login limiter answers 429; a 60 MB body gets 413 and the server stays up; malformed JSON has no stack trace; a foreign `Origin` gets no `Allow-Credentials`; `/.env`, `/.git/config`, `/app.js`, `/package.json` are not served.
 
 **Payment failure paths (CODM webhook, `test/security/payments.test.js`)**, all ✅: wrong signature; declined charge; wrong amount, currency, player or app; duplicate and late webhooks (idempotent, `paidAt` unchanged); paying twice keeps the first reference; a refunded checkout never re-pays; unknown reference ignored; malformed JSON gives 400.
+
+## Route sweep (2026-11-28)
+Every `router.post|put|patch|delete` outside the isolated apps (CropGuard, CODM, platform, CleanBridge, SeedBridge, Nsoro, GH-GPT) was listed and checked for auth at the route, router or mount level. Left public on purpose: `POST /afa/register` (public sign-up form), `/ussd/start` and `/ussds` (Africa's Talking webhooks), `/push/ack|call-status|call-decline` (signed receipts), `/paystack/initiate` (creates a checkout only), `/jayrouter/backups` (HMAC-signed). Rows 16–21 came out of this sweep.
 
 ## Live check of the Render sites (2026-11-26, read-only)
 

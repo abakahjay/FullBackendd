@@ -121,7 +121,7 @@ event through `utils/socket.js` `emitToUserId`. They are called from `likePosts`
 need auth. Other routes: `GET /users/search?q=` (regex-escaped, must stay above `/users/:id`), `GET /posts/liked/:id`,
 and `GET /posts/saved` plus `PATCH /posts/:postId/save` (auth; `User.saved` holds Posts ids, whereas `User.posts`
 holds GridFS file ids). `getUser`, `getUserByName` and `getAllUsers` strip password, tokens and reset fields,
-including on populated followers and following. `scripts/backfillPostMediaType.js` repairs `Posts.mediaType` for
+including on populated followers and following; email and phone only reach the account owner or an admin (`withoutContact`, routes use `optionalAuth`). `scripts/backfillPostMediaType.js` repairs `Posts.mediaType` for
 posts uploaded before it was recorded.
 
 **Nsoro moments (stories)** (`/api/v1/stories`, all auth, mounted next to posts because uploads are multipart): stories go into the
@@ -583,7 +583,7 @@ The FullBackendd API is shared by many live apps (Nsoro, GH-GPT, CleanBridge, Se
 Merged into `main` (fast-forward, 2026-11-26); Render deploys `main`, so it goes live on `git push origin main`
 (push from your own terminal; never push the `archive/*` branches: they contain an old `.env`). Full findings with evidence: `PRODUCTION_AUDIT.md`.
 
-**Tests** (62, all green 2026-11-28; CI runs them on every push via `.github/workflows/ci.yml`):
+**Tests** (64, all green 2026-11-28; CI runs them on every push via `.github/workflows/ci.yml`):
 `CROPGUARD_TEST_MONGO_URI=mongodb://127.0.0.1:27017/x_test npm run test:security` (self-pentest + Paystack webhook failure
 paths in `test/security/`), `test:cropguard`, `test:platform`. No local Mongo: `npm i mongodb-memory-server` in a folder
 outside this repo and start `MongoMemoryServer.create({ instance: { port: 27017 } })`. Add a test to `test/security/`
